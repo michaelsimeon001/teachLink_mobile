@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { ApiClient } from '../../types/apiClient';
 import { InternalAxiosRequestConfig } from 'axios';
 import * as Network from 'expo-network';
 
@@ -64,7 +65,8 @@ class RequestQueue {
   private listeners: ((count: number) => void)[] = [];
   private monitoringInterval: ReturnType<typeof setInterval> | null = null;
   private networkListener: (() => void) | null = null;
-  private apiClient: any | null = null;
+  // #802: typed as ApiClient to prevent passing arbitrary objects
+  private apiClient: ApiClient | null = null;
   private metrics: QueueMetrics = {
     totalQueued: 0,
     byPriority: { critical: 0, high: 0, normal: 0, low: 0 },
@@ -202,7 +204,7 @@ class RequestQueue {
     }
   }
 
-  async processQueue(apiClient?: any): Promise<void> {
+  async processQueue(apiClient?: ApiClient): Promise<void> {
     if (this.isProcessing) return;
 
     if (apiClient) {
@@ -283,7 +285,7 @@ class RequestQueue {
       .catch(() => {});
   }
 
-  startMonitoring(apiClient?: any): void {
+  startMonitoring(apiClient?: ApiClient): void {
     if (apiClient) {
       this.apiClient = apiClient;
     }

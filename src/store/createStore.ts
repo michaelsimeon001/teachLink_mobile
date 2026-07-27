@@ -45,13 +45,15 @@ export const createStore = <T extends object>(
         storage: createJSONStorage(() => asyncMMKVStorage),
         partialize,
         migrate,
-        onRehydrateStorage: (state) => {
-          return (state, error) => {
+        onRehydrateStorage: (_initialState) => {
+          // #803: explicitly type both params so implicit `any` is eliminated.
+          // `error` is `Error | undefined` per the Zustand persist middleware signature.
+          return (_rehydratedState: T | undefined, error: Error | undefined) => {
             if (error) {
               appLogger.errorSync('an error happened during hydration', error instanceof Error ? error : new Error(String(error)))
               logger.errorSync('an error happened during hydration', error as Error)
             }
-          }
+          };
         },
       }),
       { name: `Teach-This-${name}` }
