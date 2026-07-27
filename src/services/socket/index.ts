@@ -153,9 +153,13 @@ class SocketService {
     if (this.isBackgrounded) return;
 
     this.clearReconnectTimer();
-    const delay = BACKOFF_DELAYS[this.backoffIndex] ?? BACKOFF_DELAYS[BACKOFF_DELAYS.length - 1];
-    const jitter = 0.9 + Math.random() * 0.2;
-    const actualDelay = Math.round(delay * jitter);
+    const ceiling = BACKOFF_DELAYS[this.backoffIndex] ?? BACKOFF_DELAYS[BACKOFF_DELAYS.length - 1];
+    // #810: Full jitter — pick a random value between 0 and the full backoff ceiling
+    // instead of ±10 % around a fixed value. When a server restarts and many clients
+    // reconnect simultaneously, fixed jitter clusters all delays near the same point
+    // (thundering herd). Full jitter spreads reconnects uniformly over [0, ceiling],
+    // distributing server load across the entire window.
+    const actualDelay = Math.round(Math.random() * ceiling);
 
     appLogger.info(`Socket reconnecting in ${actualDelay}ms (backoff index: ${this.backoffIndex})`);
 
