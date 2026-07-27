@@ -1,4 +1,5 @@
 import { AppState, AppStateStatus } from 'react-native';
+import { MMKV } from 'react-native-mmkv';
 import { io, Socket } from 'socket.io-client';
 
 import { useSocketStore } from '../../store';
@@ -12,8 +13,19 @@ import type { ConflictResolutionStrategy, VersionedSyncMessage } from '../sync/t
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 5_000;
+const QUEUE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const QUEUE_STORAGE_KEY = 'socket:outgoing-queue';
 
 const BACKOFF_DELAYS = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
+
+interface QueuedMessage {
+  id: string;
+  event: string;
+  data: Record<string, any>;
+  timestamp: number;
+}
+
+const mmkv = new MMKV();
 
 class SocketService {
   private socket: Socket | null = null;
@@ -25,9 +37,12 @@ class SocketService {
   private intentionalDisconnect = false;
   private isBackgrounded = false;
   private appStateSubscription: ReturnType<typeof AppState.addEventListener> | null = null;
+  private outgoingQueue: QueuedMessage[] = [];
 
   connect() {
     if (this.socket?.connected) return this.socket;
+
+    this.restoreQueue();
 
     if (!this.appStateSubscription) {
       this.appStateSubscription = AppState.addEventListener(
@@ -63,6 +78,7 @@ class SocketService {
 
         this.backoffIndex = 0;
         this.startHeartbeat();
+        this.replayQueue();
       });
 
       this.socket.on('disconnect', (reason: string) => {
@@ -185,11 +201,22 @@ class SocketService {
   }
 
   emit(event: string, data: Record<string, any>) {
-    if (!this.socket) return;
-
     const start = performance.now();
     const encoded = encodeBinaryMessage(event, data);
     const sizeBytes = encoded.byteLength;
+
+    if (!this.socket?.connected) {
+      const queuedMessage: QueuedMessage = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        event,
+        data,
+        timestamp: Date.now(),
+      };
+      this.outgoingQueue.push(queuedMessage);
+      this.persistQueue();
+      appLogger.info(`[Socket Queue] Message queued: ${event} (queue size: ${this.outgoingQueue.length})`);
+      return;
+    }
 
     this.socket.emit(event, encoded);
 
@@ -305,6 +332,57 @@ class SocketService {
   private defaultStrategyForEvent(event: string): ConflictResolutionStrategy {
     if (event === 'notification_created') return 'server-wins';
     return 'merge';
+  }
+
+  persistQueue(): void {
+    try {
+      mmkv.set(QUEUE_STORAGE_KEY, JSON.stringify(this.outgoingQueue));
+    } catch (error) {
+      appLogger.error('Failed to persist socket message queue:', error);
+    }
+  }
+
+  restoreQueue(): void {
+    try {
+      const raw = mmkv.getString(QUEUE_STORAGE_KEY);
+      if (!raw) return;
+
+      const stored: QueuedMessage[] = JSON.parse(raw);
+      const now = Date.now();
+      this.outgoingQueue = stored.filter(msg => now - msg.timestamp < QUEUE_TTL_MS);
+
+      const expiredCount = stored.length - this.outgoingQueue.length;
+      if (expiredCount > 0) {
+        appLogger.info(`[Socket Queue] Discarded ${expiredCount} expired messages`);
+      }
+      if (this.outgoingQueue.length > 0) {
+        appLogger.info(`[Socket Queue] Restored ${this.outgoingQueue.length} queued messages`);
+      }
+      this.persistQueue();
+    } catch (error) {
+      appLogger.error('Failed to restore socket message queue:', error);
+      this.outgoingQueue = [];
+    }
+  }
+
+  private replayQueue(): void {
+    if (this.outgoingQueue.length === 0) return;
+    if (!this.socket?.connected) return;
+
+    const messages = [...this.outgoingQueue];
+    this.outgoingQueue = [];
+    this.persistQueue();
+
+    appLogger.info(`[Socket Queue] Replaying ${messages.length} queued messages`);
+    for (const msg of messages) {
+      const encoded = encodeBinaryMessage(msg.event, msg.data);
+      this.socket.emit(msg.event, encoded);
+      appLogger.info(`[Socket Queue] Replayed: ${msg.event}`);
+    }
+  }
+
+  get queuedMessageCount(): number {
+    return this.outgoingQueue.length;
   }
 }
 
