@@ -106,6 +106,50 @@ function invalidateSuccessfulMutationCache(config: InternalAxiosRequestConfig): 
   invalidateCacheForMutation(method, url);
 }
 
+// ─── Batched cache statistics (#811) ──────────────────────────────────────────
+//
+// Computing cache hit-rate on every successful response adds JS-thread overhead
+// proportional to request frequency. Instead, we keep two integer counters and
+// flush aggregated stats to the logger on a 60-second interval, reducing
+// per-response work to a single increment.
+
+interface CacheStats {
+  hits: number;
+  misses: number;
+}
+
+const _cacheStats: CacheStats = { hits: 0, misses: 0 };
+const CACHE_STATS_INTERVAL_MS = 60_000;
+
+/** Call when the SWR cache serves a response without a network round-trip. */
+export function recordCacheHit(): void {
+  _cacheStats.hits++;
+}
+
+/** Call when a full network request was needed (no usable cached value). */
+export function recordCacheMiss(): void {
+  _cacheStats.misses++;
+}
+
+function flushCacheStats(): void {
+  const { hits, misses } = _cacheStats;
+  const total = hits + misses;
+  if (total === 0) return;
+  const hitRate = ((hits / total) * 100).toFixed(1);
+  appLogger.infoSync(
+    `[CacheStats] ${hitRate}% hit rate over last 60 s (${hits}/${total} requests served from cache)`,
+    { cacheHits: hits, cacheMisses: misses, hitRatePct: parseFloat(hitRate) }
+  );
+  _cacheStats.hits = 0;
+  _cacheStats.misses = 0;
+}
+
+/** Flush immediately (e.g. on app background). */
+export const flushCacheStatsNow = flushCacheStats;
+
+// Start the periodic flush loop once when the module loads.
+setInterval(flushCacheStats, CACHE_STATS_INTERVAL_MS);
+
 // ─── Rate Limit Backoff (Issue #141) ──────────────────────────────────────
 
 /**
@@ -240,6 +284,10 @@ apiClient.interceptors.response.use(
       statusCode: response.status,
     });
     invalidateSuccessfulMutationCache(cfg);
+    // #811: every response that reaches this interceptor was a network round-trip
+    // (SWR cache hits are returned before the request is dispatched and never arrive
+    // here). Increment the miss counter so the 60 s flush captures real network usage.
+    recordCacheMiss();
 
     // Successful login clears the client-side lockout counter
     if (cfg.url?.includes('/auth/login')) {
