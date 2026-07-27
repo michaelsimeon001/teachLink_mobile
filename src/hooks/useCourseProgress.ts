@@ -44,7 +44,7 @@ export function useCourseProgress({
   const [fullProgress, setFullProgress] = useState<CourseProgress | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const { setCourseProgress } = useCourseProgressStore();
+  const setCourseProgress = useCourseProgressStore(state => state.setCourseProgress);
 
   // Debounce timer ref for server sync
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

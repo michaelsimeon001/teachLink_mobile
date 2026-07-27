@@ -3,6 +3,7 @@ import { loadAsync } from 'expo-font';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
+import { appLogger } from '../utils/logger';
 import logger from '../utils/logger';
 
 // Font configuration
@@ -93,6 +94,7 @@ async function loadSingleFont(config: FontConfig): Promise<boolean> {
       return true;
     })
     .catch((error) => {
+      appLogger.errorSync(`Failed to load font ${config.name}:`, error instanceof Error ? error : new Error(String(error)));
       logger.errorSync(`Failed to load font ${config.name}:`, error);
       return false;
     });
@@ -236,6 +238,7 @@ export async function preloadCriticalFonts() {
   const { loaded, failed } = await loadFontsWithProgress(criticalFonts);
 
   if (failed.length > 0) {
+    appLogger.warnSync('Some critical fonts failed to load:', { failed });
     logger.warnSync('Some critical fonts failed to load:', { failed });
   }
 

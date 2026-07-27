@@ -73,4 +73,39 @@ export const courseApi = {
   invalidateCourse(id: string): void {
     invalidateCacheByTags([COURSE_TAG, courseTag(id)]);
   },
+
+  /**
+   * loadLessonsPage — fetch a paginated slice of lesson metadata for a course.
+   *
+   * Used by the windowed loading implementation in courseProgressStore to avoid
+   * loading all 50+ lessons into memory at once. Only metadata (IDs, titles,
+   * durations, video URLs) is fetched; heavy content is loaded on demand.
+   *
+   * @param courseId  - Course to paginate lessons for.
+   * @param page      - 1-based page number.
+   * @param limit     - Lessons per page (default 5 — current ± 2 window).
+   */
+  async loadLessonsPage(
+    courseId: string,
+    page: number,
+    limit = 5
+  ): Promise<{ lessons: import('../../types/course').Lesson[]; totalLessons: number; page: number; totalPages: number }> {
+    const cacheKey = `courses:${courseId}:lessons:page=${page}:limit=${limit}`;
+    return fetchWithSWR(
+      cacheKey,
+      () =>
+        apiClient
+          .get<{ lessons: import('../../types/course').Lesson[]; totalLessons: number; page: number; totalPages: number }>(
+            `/courses/${courseId}/lessons`,
+            { params: { page, limit } }
+          )
+          .then(r => r.data),
+      TTL,
+      STALE_TTL,
+      {
+        dataType: 'lesson-page',
+        tags: [COURSE_TAG, courseTag(courseId)],
+      }
+    );
+  },
 };

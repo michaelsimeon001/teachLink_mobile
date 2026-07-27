@@ -3,6 +3,7 @@ import { Asset } from 'expo-asset';
 import * as Font from 'expo-font';
 import { Platform } from 'react-native';
 
+import { appLogger } from '../utils/logger';
 import logger from '../utils/logger';
 
 // Font metadata interface
@@ -55,6 +56,7 @@ class FontService {
         });
       }
     } catch (error) {
+      appLogger.errorSync('Failed to load font metadata:', error instanceof Error ? error : new Error(String(error)));
       logger.errorSync('Failed to load font metadata:', error as Error);
     }
   }
@@ -65,6 +67,7 @@ class FontService {
       const data = Object.fromEntries(this.metadata);
       await AsyncStorage.setItem(this.cacheKey, JSON.stringify(data));
     } catch (error) {
+      appLogger.errorSync('Failed to save font metadata:', error instanceof Error ? error : new Error(String(error)));
       logger.errorSync('Failed to save font metadata:', error as Error);
     }
   }
@@ -77,6 +80,7 @@ class FontService {
         this.defaultSettings = JSON.parse(cached);
       }
     } catch (error) {
+      appLogger.errorSync('Failed to load font settings:', error instanceof Error ? error : new Error(String(error)));
       logger.errorSync('Failed to load font settings:', error as Error);
     }
   }
@@ -86,6 +90,7 @@ class FontService {
     try {
       await AsyncStorage.setItem(this.settingsKey, JSON.stringify(this.defaultSettings));
     } catch (error) {
+      appLogger.errorSync('Failed to save font settings:', error instanceof Error ? error : new Error(String(error)));
       logger.errorSync('Failed to save font settings:', error as Error);
     }
   }
@@ -164,6 +169,7 @@ class FontService {
 
       return true;
     } catch (error) {
+      appLogger.errorSync(`Failed to load font ${name}:`, error instanceof Error ? error : new Error(String(error)));
       logger.errorSync(`Failed to load font ${name}:`, error as Error);
       return false;
     }
@@ -269,6 +275,7 @@ class FontService {
       this.loadedFonts.add(name);
     });
     const elapsed = Date.now() - start;
+    appLogger.infoSync(`[FontService] Loaded ${fonts.length} font(s) in ${elapsed}ms`);
     logger.infoSync(`[FontService] Loaded ${fonts.length} font(s) in ${elapsed}ms`);
   }
 
