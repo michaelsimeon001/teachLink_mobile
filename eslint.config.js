@@ -28,6 +28,21 @@ module.exports = defineConfig([
       },
     },
     rules: {
+      // #809: Require a justification comment on every @ts-ignore or @ts-expect-error.
+      // @ts-ignore suppresses ALL type errors on the next line without verifying they
+      // still exist; it is easy to forget and leaves dead suppressions in the codebase.
+      // @ts-expect-error is safer (fails if the suppression is no longer needed) but
+      // still requires a minimum-length reason so reviewers can evaluate legitimacy.
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        {
+          'ts-ignore': 'allow-with-description',
+          'ts-expect-error': 'allow-with-description',
+          'ts-nocheck': true,
+          'ts-check': false,
+          minimumDescriptionLength: 10,
+        },
+      ],
       'import/order': [
         'warn',
         {
