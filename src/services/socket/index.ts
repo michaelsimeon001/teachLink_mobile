@@ -203,12 +203,17 @@ class SocketService {
     });
   }
 
-  on(event: string, callback: (data: any) => void) {
+  /**
+   * #805: Generic overload so consumers infer the data type from the event name
+   * rather than receiving `any`. Pass `T` explicitly for full type safety:
+   *   socketService.on<CourseUpdatedPayload>('course_updated', handler)
+   */
+  on<T = unknown>(event: string, callback: (data: T) => void) {
     if (!this.socket) return;
 
-    this.socket.on(event, (data: any) => {
+    this.socket.on(event, (raw: unknown) => {
       const start = performance.now();
-      const parsed = this.parseIncoming(data);
+      const parsed = this.parseIncoming(raw) as T;
       const rawString = JSON.stringify(parsed);
       const sizeBytes = rawString.length;
 
@@ -244,8 +249,8 @@ class SocketService {
     });
   }
 
-  private registerLoggedHandler(event: string, handler: (data: unknown) => void): void {
-    this.socket?.on(event, (raw: any) => {
+  private registerLoggedHandler<T = unknown>(event: string, handler: (data: T) => void): void {
+    this.socket?.on(event, (raw: unknown) => {
       const start = performance.now();
       const parsed = this.parseIncoming(raw);
       const rawString = JSON.stringify(parsed);
