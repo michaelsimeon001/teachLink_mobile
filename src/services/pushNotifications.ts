@@ -360,13 +360,61 @@ export async function syncBadgeFromServer(): Promise<void> {
 
 let appStateSubscription: { remove: () => void } | null = null;
 
+// #812: Module-level guard prevents token-refresh listeners from accumulating
+// across multiple app launches / background restores. Only one listener is ever
+// registered; subsequent calls return the existing cleanup without adding a new one.
+let tokenExpirySubscription: import('expo-notifications').Subscription | null = null;
+
+/**
+ * Subscribe to Expo push token changes (token rotation / expiry).
+ *
+ * expo-notifications fires `addPushTokenListener` whenever the OS issues a new
+ * push token for the app — e.g. after a token reset or app reinstall.
+ * We re-register the fresh token with the backend automatically.
+ *
+ * Guards against accumulation: if called multiple times (re-renders, app
+ * restore) only one listener is ever active at a time.
+ */
+export function setupTokenExpiryListener(): () => void {
+  if (tokenExpirySubscription !== null) {
+    // Already registered — skip to prevent duplicate handlers on re-launch
+    return () => {
+      /* no-op: listener was already registered by an earlier call */
+    };
+  }
+
+  const Notifications = require('expo-notifications') as typeof import('expo-notifications');
+  tokenExpirySubscription = Notifications.addPushTokenListener(async tokenData => {
+    try {
+      await registerTokenWithBackend(tokenData.data);
+      logger.info('Push token rotated and re-registered with backend');
+    } catch (error) {
+      logger.error('Failed to re-register rotated push token:', error);
+    }
+  });
+
+  return () => {
+    if (tokenExpirySubscription) {
+      tokenExpirySubscription.remove();
+      tokenExpirySubscription = null;
+    }
+  };
+}
+
 /**
  * Subscribe to AppState changes and sync badges on foreground.
  * Should be called once during app initialization.
  */
 export function setupForegroundBadgeSync(): () => void {
   if (appStateSubscription) {
-    appStateSubscription.remove();
+    // Already subscribed — return existing cleanup rather than removing and
+    // re-adding, which would cause double-fire on the next app restore.
+    return () => {
+      if (appStateSubscription) {
+        appStateSubscription.remove();
+        appStateSubscription = null;
+      }
+    };
   }
 
   const handleAppStateChange = (nextState: AppStateStatus) => {
