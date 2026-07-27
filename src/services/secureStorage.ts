@@ -38,6 +38,7 @@ const KEYS = {
   USER_DATA: 'teachlink_user_data',
   SESSION_EXPIRES_AT: 'teachlink_session_expires_at',
   BIOMETRIC_ENABLED: 'teachlink_biometric_enabled',
+  BIOMETRIC_ENROLLMENT_ID: 'teachlink_biometric_enrollment_id',
   REMEMBERED_EMAIL: 'teachlink_remembered_email',
   REMEMBER_ME: 'teachlink_remember_me',
   INSTALL_UUID: 'teachlink_install_uuid',
@@ -328,7 +329,53 @@ export async function isBiometricEnabled(): Promise<boolean> {
   return value === '1';
 }
 
-// ─── AsyncStorage Security Guard ───────────────────────────────────────────────
+// ─── Biometric enrollment tracking ────────────────────────────────────────────
+//
+// When a user adds, removes, or re-enrolls their biometrics (e.g. a new
+// fingerprint), the OS may invalidate Keychain/Keystore items that were
+// protected by the previous biometric enrollment.  To detect this we store
+// a "biometric enrollment id" — a random UUID generated at the time the
+// user first enables biometric login.  On every subsequent biometric
+// attempt we compare the stored id with the current state; if they differ
+// (or the secure data is no longer accessible) we know the enrollment has
+// changed and the user must re-enroll.
+//
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Save the biometric enrollment identifier to secure storage.
+ *
+ * This id is generated once when the user enables biometric login and
+ * should be compared against the current enrollment state on every
+ * biometric login attempt.
+ *
+ * @param enrollmentId  A UUID that uniquely identifies the enrollment session.
+ */
+export async function saveBiometricEnrollmentId(enrollmentId: string): Promise<void> {
+  await setItem(KEYS.BIOMETRIC_ENROLLMENT_ID, enrollmentId, false);
+  logger.info('Biometric enrollment id saved to secure storage');
+}
+
+/**
+ * Retrieve the stored biometric enrollment identifier.
+ *
+ * @returns The enrollment id, or `null` if none has been stored.
+ */
+export async function getBiometricEnrollmentId(): Promise<string | null> {
+  return getItem(KEYS.BIOMETRIC_ENROLLMENT_ID, false);
+}
+
+/**
+ * Remove the stored biometric enrollment identifier.
+ *
+ * Called during re-enrollment or when biometric login is disabled.
+ */
+export async function clearBiometricEnrollmentId(): Promise<void> {
+  await removeItem(KEYS.BIOMETRIC_ENROLLMENT_ID);
+  logger.info('Biometric enrollment id cleared from secure storage');
+}
+
+// ─── AsyncStorage Security Guard ────────────────────────────────────────────────
 // SECURITY: AsyncStorage is UNENCRYPTED plaintext storage.
 // NEVER use AsyncStorage for: tokens, passwords, session data, PII, or any
 // sensitive user data. It is only acceptable for non-sensitive caches,

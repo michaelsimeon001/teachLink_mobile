@@ -88,6 +88,30 @@ const SettingRow = memo(function SettingRow({
 });
 
 // ─────────────────────────────────────────────────────────────
+// Stable icon elements (created once to preserve referential
+// identity across renders — enables React.memo on SettingRow)
+// ─────────────────────────────────────────────────────────────
+
+const ICON_EYE = <Eye size={18} color="#6366f1" />;
+const ICON_LOCK = <Lock size={18} color="#10b981" />;
+const ICON_FINGERPRINT = <FingerprintPattern size={18} color="#06b6d4" />;
+const ICON_USER = <User size={18} />;
+const ICON_CREDIT_CARD_YELLOW = <CreditCard size={18} color="#f59e0b" />;
+const ICON_CREDIT_CARD_GREEN = <CreditCard size={18} color="#10b981" />;
+const ICON_SUN = <Sun size={18} />;
+const ICON_DATABASE = <Database size={18} color="#eab308" />;
+const ICON_BAR_CHART = <BarChart2 size={18} />;
+const ICON_TRASH_RED = <Trash2 size={18} color="red" />;
+const ICON_DOWNLOAD_INDIGO = <Download size={18} color="#6366f1" />;
+const ICON_WIFI = <Wifi size={18} />;
+const ICON_DOWNLOAD = <Download size={18} />;
+const ICON_REFRESH = <RefreshCw size={18} />;
+const ICON_ZAP = <Zap size={18} color="#06b6d4" />;
+const ICON_SHIELD = <ShieldAlert size={18} color="#ef4444" />;
+const ICON_LOGOUT_RED = <LogOut size={18} color="red" />;
+const ICON_ALERT = <AlertTriangle size={18} color="#dc2626" />;
+
+// ─────────────────────────────────────────────────────────────
 // Options
 // ─────────────────────────────────────────────────────────────
 
@@ -344,58 +368,125 @@ export const MobileSettings = ({ onSignOut, onChangePassword, onLinkedAccounts }
     );
   }, [performReauthCheck]);
 
+  // Wrap parent-provided callbacks so they are stable references
+  const handleChangePassword = useCallback(() => {
+    onChangePassword?.();
+  }, [onChangePassword]);
+
+  const handleLinkedAccounts = useCallback(() => {
+    onLinkedAccounts?.();
+  }, [onLinkedAccounts]);
+
+  // ── Memoised right elements (stable references) ────────
+  const profileVisibilityRight = useMemo(
+    () => (
+      <SettingsPicker
+        label="Visibility"
+        value={profileVisibility}
+        options={VISIBILITY_OPTIONS}
+        onValueChange={setProfileVisibility}
+      />
+    ),
+    [profileVisibility, setProfileVisibility]
+  );
+
+  const twoFactorRight = useMemo(
+    () => <NativeToggle value={twoFactorEnabled} onValueChange={setTwoFactorEnabled} />,
+    [twoFactorEnabled, setTwoFactorEnabled]
+  );
+
+  const biometricIcon = useMemo(
+    () => (biometricLoading ? <ActivityIndicator /> : ICON_FINGERPRINT),
+    [biometricLoading]
+  );
+
+  const biometricRight = useMemo(
+    () => (
+      <NativeToggle
+        value={biometricEnabled}
+        onValueChange={handleBiometricToggle}
+        disabled={biometricLoading}
+      />
+    ),
+    [biometricEnabled, handleBiometricToggle, biometricLoading]
+  );
+
+  const themeRight = useMemo(
+    () => (
+      <SettingsPicker
+        label="Theme"
+        value={theme}
+        options={THEME_OPTIONS}
+        onValueChange={setTheme}
+      />
+    ),
+    [theme, setTheme]
+  );
+
+  const dataSaverRight = useMemo(
+    () => (
+      <NativeToggle value={dataSaverEnabled} onValueChange={setDataSaverEnabled} />
+    ),
+    [dataSaverEnabled, setDataSaverEnabled]
+  );
+
+  const analyticsRight = useMemo(
+    () => <NativeToggle value={analyticsEnabled} onValueChange={setAnalyticsEnabled} />,
+    [analyticsEnabled, setAnalyticsEnabled]
+  );
+
+  const wifiOnlyRight = useMemo(
+    () => (
+      <NativeToggle value={downloadOverWifiOnly} onValueChange={setDownloadOverWifiOnly} />
+    ),
+    [downloadOverWifiOnly, setDownloadOverWifiOnly]
+  );
+
+  const qualityRight = useMemo(
+    () => (
+      <SettingsPicker
+        label="Quality"
+        value={downloadQuality}
+        options={QUALITY_OPTIONS}
+        onValueChange={setDownloadQuality}
+      />
+    ),
+    [downloadQuality, setDownloadQuality]
+  );
+
   return (
     <ScrollView className="flex-1 bg-gray-50 dark:bg-gray-900">
       {/* ── ESSENTIAL: ACCOUNT ─────────────────────────────── */}
       <SettingsSection title="Account">
         <SettingRow
-          icon={<Eye size={18} color="#6366f1" />}
+          icon={ICON_EYE}
           label="Profile Visibility"
-          right={
-            <SettingsPicker
-              label="Visibility"
-              value={profileVisibility}
-              options={VISIBILITY_OPTIONS}
-              onValueChange={setProfileVisibility}
-            />
-          }
+          right={profileVisibilityRight}
         />
 
         <SettingRow
-          icon={<Lock size={18} color="#10b981" />}
+          icon={ICON_LOCK}
           label="Two-Factor Auth"
-          right={<NativeToggle value={twoFactorEnabled} onValueChange={setTwoFactorEnabled} />}
+          right={twoFactorRight}
         />
 
         {biometricAvailable && (
           <SettingRow
-            icon={
-              biometricLoading ? (
-                <ActivityIndicator />
-              ) : (
-                <FingerprintPattern size={18} color="#06b6d4" />
-              )
-            }
+            icon={biometricIcon}
             label="Biometric Login"
             description={biometricEnabled ? 'Enabled' : 'Disabled'}
-            right={
-              <NativeToggle
-                value={biometricEnabled}
-                onValueChange={handleBiometricToggle}
-                disabled={biometricLoading}
-              />
-            }
+            right={biometricRight}
           />
         )}
 
-        <SettingRow icon={<User size={18} />} label="Change Password" onPress={onChangePassword} />
+        <SettingRow icon={ICON_USER} label="Change Password" onPress={handleChangePassword} />
         <SettingRow
-          icon={<CreditCard size={18} color="#f59e0b" />}
+          icon={ICON_CREDIT_CARD_YELLOW}
           label="Change Payment Method"
           onPress={handleChangePaymentMethod}
         />
         <SettingRow
-          icon={<CreditCard size={18} color="#10b981" />}
+          icon={ICON_CREDIT_CARD_GREEN}
           label="View Full Card Number"
           onPress={handleViewFullCardNumber}
         />
@@ -404,23 +495,16 @@ export const MobileSettings = ({ onSignOut, onChangePassword, onLinkedAccounts }
       {/* ── ESSENTIAL: APP ─────────────────────────────────── */}
       <SettingsSection title="App">
         <SettingRow
-          icon={<Sun size={18} />}
+          icon={ICON_SUN}
           label="Theme"
-          right={
-            <SettingsPicker
-              label="Theme"
-              value={theme}
-              options={THEME_OPTIONS}
-              onValueChange={setTheme}
-            />
-          }
+          right={themeRight}
         />
 
         <SettingRow
-          icon={<Database size={18} color="#eab308" />}
+          icon={ICON_DATABASE}
           label="Data Saver"
           description="Reduces bandwidth by disabling prefetch and lowering image quality"
-          right={<NativeToggle value={dataSaverEnabled} onValueChange={setDataSaverEnabled} />}
+          right={dataSaverRight}
         />
       </SettingsSection>
 
@@ -432,13 +516,13 @@ export const MobileSettings = ({ onSignOut, onChangePassword, onLinkedAccounts }
           {/* PRIVACY */}
           <SettingsSection title="Privacy">
             <SettingRow
-              icon={<BarChart2 size={18} />}
+              icon={ICON_BAR_CHART}
               label="Analytics"
-              right={<NativeToggle value={analyticsEnabled} onValueChange={setAnalyticsEnabled} />}
+              right={analyticsRight}
             />
 
             <SettingRow
-              icon={<Trash2 size={18} color="red" />}
+              icon={ICON_TRASH_RED}
               label="Clear Cached Form Data"
               description="Remove saved autofill values from this device"
               onPress={handleClearFormCache}
@@ -446,7 +530,7 @@ export const MobileSettings = ({ onSignOut, onChangePassword, onLinkedAccounts }
             />
 
             <SettingRow
-              icon={<Download size={18} color="#6366f1" />}
+              icon={ICON_DOWNLOAD_INDIGO}
               label="Export Personal Data"
               description="Export your account details and learning progress"
               onPress={handleExportData}
@@ -456,31 +540,19 @@ export const MobileSettings = ({ onSignOut, onChangePassword, onLinkedAccounts }
           {/* DOWNLOADS */}
           <SettingsSection title="Downloads">
             <SettingRow
-              icon={<Wifi size={18} />}
+              icon={ICON_WIFI}
               label="WiFi Only"
-              right={
-                <NativeToggle
-                  value={downloadOverWifiOnly}
-                  onValueChange={setDownloadOverWifiOnly}
-                />
-              }
+              right={wifiOnlyRight}
             />
 
             <SettingRow
-              icon={<Download size={18} />}
+              icon={ICON_DOWNLOAD}
               label="Quality"
-              right={
-                <SettingsPicker
-                  label="Quality"
-                  value={downloadQuality}
-                  options={QUALITY_OPTIONS}
-                  onValueChange={setDownloadQuality}
-                />
-              }
+              right={qualityRight}
             />
 
             <SettingRow
-              icon={<Trash2 size={18} color="red" />}
+              icon={ICON_TRASH_RED}
               label="Clear Downloads"
               onPress={handleClearDownloads}
               destructive
@@ -490,7 +562,7 @@ export const MobileSettings = ({ onSignOut, onChangePassword, onLinkedAccounts }
           {/* SYNC */}
           <SettingsSection title="Sync">
             <SettingRow
-              icon={<RefreshCw size={18} />}
+              icon={ICON_REFRESH}
               label="Manual Sync"
               onPress={handleManualSync}
             />
@@ -499,13 +571,13 @@ export const MobileSettings = ({ onSignOut, onChangePassword, onLinkedAccounts }
           {/* PERFORMANCE & UTILITIES */}
           <SettingsSection title="Performance & Utilities">
             <SettingRow
-              icon={<Zap size={18} color="#06b6d4" />}
+              icon={ICON_ZAP}
               label="Clipboard Optimizer"
               description="Test & profile asynchronous clipboard operations"
             />
 
             <SettingRow
-              icon={<ShieldAlert size={18} color="#ef4444" />}
+              icon={ICON_SHIELD}
               label="Admin Dashboard"
               description="Access systems health & performance diagnostics"
               onPress={handleAdminDashboard}
@@ -517,13 +589,13 @@ export const MobileSettings = ({ onSignOut, onChangePassword, onLinkedAccounts }
       {/* ── ESSENTIAL: ACCOUNT ACTIONS ─────────────────────── */}
       <SettingsSection title="Account Actions">
         <SettingRow
-          icon={<LogOut size={18} color="red" />}
+          icon={ICON_LOGOUT_RED}
           label="Sign Out"
           onPress={handleSignOut}
           destructive
         />
         <SettingRow
-          icon={<AlertTriangle size={18} color="#dc2626" />}
+          icon={ICON_ALERT}
           label="Delete Account"
           description="Permanently delete your account and all data"
           onPress={handleDeleteAccount}

@@ -10,6 +10,8 @@ import {
 import { immer } from 'zustand/middleware/immer';
 import logger from '../utils/logger';
 
+import { appLogger } from '../utils/logger';
+
 const storage = new MMKV();
 
 /**
@@ -48,10 +50,8 @@ export const createStore = <T extends object>(
           // `error` is `Error | undefined` per the Zustand persist middleware signature.
           return (_rehydratedState: T | undefined, error: Error | undefined) => {
             if (error) {
-              logger.errorSync('an error happened during hydration', error);
-              // Reset persisted state to defaults on corrupt storage to avoid
-              // leaving the app in a broken half-hydrated state.
-              logger.warnSync('Resetting corrupted persisted state for store: ' + name);
+              appLogger.errorSync('an error happened during hydration', error instanceof Error ? error : new Error(String(error)))
+              logger.errorSync('an error happened during hydration', error as Error)
             }
           };
         },

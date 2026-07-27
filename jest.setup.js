@@ -135,6 +135,23 @@ jest.mock('expo-secure-store', () => ({
   deleteItemAsync: jest.fn(() => Promise.resolve()),
 }));
 
+// Mock expo-local-authentication for biometric auth tests
+jest.mock('expo-local-authentication', () => ({
+  hasHardwareAsync: jest.fn(() => Promise.resolve(true)),
+  isEnrolledAsync: jest.fn(() => Promise.resolve(true)),
+  getEnrolledLevelAsync: jest.fn(() => Promise.resolve(1)),
+  getSupportedAuthenticationTypesAsync: jest.fn(() =>
+    Promise.resolve([1]) // BIOMETRIC
+  ),
+  authenticateAsync: jest.fn(() =>
+    Promise.resolve({ success: true, error: null })
+  ),
+  SupportedAuthenticationTypes: {
+    BIOMETRIC: 1,
+    DEVICE_PASSCODE: 2,
+  },
+}));
+
 // Mock expo-device.  __esModule: true prevents Babel's _interopRequireWildcard
 // from copying values at import time, so tests can mutate properties directly.
 jest.mock('expo-device', () => ({
@@ -474,4 +491,3 @@ jest.mock('expo-clipboard', () => ({
   addClipboardListener: jest.fn(() => ({ remove: jest.fn() })),
   removeClipboardListener: jest.fn(),
 }), { virtual: true });
-

@@ -13,7 +13,9 @@ import {
   View,
 } from 'react-native';
 
+import { Asset } from 'expo-asset';
 import * as Updates from 'expo-updates';
+import { CRITICAL_ASSETS } from './src/constants/assets';
 
 import StorybookUI from './.rnstorybook';
 import './global.css';
@@ -73,7 +75,7 @@ requireEnvVariables();
 // Initialize centralized logging on app start
 initializeLogging().catch(err => {
   if (__DEV__) {
-    console.error('[App] Failed to initialize logging:', err);
+    appLogger.errorSync('[App] Failed to initialize logging:', err instanceof Error ? err : new Error(String(err)));
   }
 });
 
@@ -209,8 +211,15 @@ const App = () => {
   useEffect(() => {
     async function prepareApp() {
       try {
-        // 1. Load critical fonts (used on first screen) synchronously before splash hides
+        // 1. Load critical fonts and preload critical image assets in parallel
+        //    so both complete before the splash screen hides, eliminating any
+        //    image-placeholder flicker on first-time screen visits (#819).
         const fontStart = Date.now();
+        await Promise.all([
+          fontService.loadFonts(CRITICAL_FONTS),
+          Asset.loadAsync(CRITICAL_ASSETS),
+        ]);
+        appLogger.infoSync(`[App] Critical fonts & assets loaded in ${Date.now() - fontStart}ms`);
         await fontService.loadFonts(CRITICAL_FONTS);
         appLogger.infoSync(`[App] Critical fonts loaded in ${Date.now() - fontStart}ms`);
 
@@ -348,7 +357,10 @@ const App = () => {
         // Update degradation store with current feature statuses
         Object.entries(capabilities).forEach(([feature, info]) => {
           if (feature !== 'checkedAt' && 'status' in info) {
-            degradationStore.setFeatureStatus(feature as any, info.status);
+            // #807: isFeatureType narrows string key to FeatureType
+if ((Object.values(FeatureType) as string[]).includes(feature)) {
+              degradationStore.setFeatureStatus(feature as FeatureType, info.status);
+            }
           }
         });
       })
@@ -391,7 +403,10 @@ const App = () => {
           });
           Object.entries(capabilities).forEach(([feature, info]) => {
             if (feature !== 'checkedAt' && 'status' in info) {
-              degradationStore.setFeatureStatus(feature as any, info.status);
+              // #807: isFeatureType narrows string key to FeatureType
+if ((Object.values(FeatureType) as string[]).includes(feature)) {
+              degradationStore.setFeatureStatus(feature as FeatureType, info.status);
+            }
             }
           });
         })
