@@ -26,6 +26,11 @@ export interface QueuedRequest {
   entityType?: string;
   /** Entity ID for conflict resolution */
   entityId?: string;
+  /**
+   * #813: Deterministic fingerprint of method+URL+body.
+   * Duplicate requests sharing the same fingerprint are suppressed in addToQueue.
+   */
+  fingerprint?: string;
 }
 
 interface BatchGroup {
@@ -83,6 +88,15 @@ class RequestQueue {
       const method = (config.method ?? 'GET').toUpperCase();
       const endpoint = config.url ?? '/unknown';
 
+      // #813: Suppress duplicate mutations queued during the same offline session.
+      // Two requests are duplicates if they share the same method, URL, and body.
+      const fp = this.fingerprint(config);
+      const existing = queue.find(r => r.fingerprint === fp);
+      if (existing) {
+        logger.info(`RequestQueue: duplicate ${method} ${endpoint} suppressed — returning existing id ${existing.id}`);
+        return existing.id;
+      }
+
       const queuedRequest: QueuedRequest = {
         id: this.generateId(),
         config,
@@ -96,6 +110,7 @@ class RequestQueue {
         clientTimestamp: Date.now(),
         entityType: versionMetadata?.entityType,
         entityId: versionMetadata?.entityId,
+        fingerprint: fp,
       };
 
       queue.push(queuedRequest);
@@ -545,6 +560,25 @@ class RequestQueue {
     }
 
     return config;
+  }
+
+  /**
+   * #813: Deterministic fingerprint for deduplication.
+   * Identical method + URL + serialized body → same fingerprint.
+   */
+  private fingerprint(config: InternalAxiosRequestConfig): string {
+    const method = (config.method ?? 'GET').toUpperCase();
+    const url = config.url ?? '/unknown';
+    // Serialize body deterministically; fall back to empty string for GET/HEAD
+    let body = '';
+    if (config.data !== undefined && config.data !== null) {
+      try {
+        body = typeof config.data === 'string' ? config.data : JSON.stringify(config.data);
+      } catch {
+        body = String(config.data);
+      }
+    }
+    return `${method}:${url}:${body}`;
   }
 
   private generateId(): string {
