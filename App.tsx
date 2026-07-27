@@ -348,7 +348,10 @@ const App = () => {
         // Update degradation store with current feature statuses
         Object.entries(capabilities).forEach(([feature, info]) => {
           if (feature !== 'checkedAt' && 'status' in info) {
-            degradationStore.setFeatureStatus(feature as any, info.status);
+            // #807: isFeatureType narrows string key to FeatureType
+if ((Object.values(FeatureType) as string[]).includes(feature)) {
+              degradationStore.setFeatureStatus(feature as FeatureType, info.status);
+            }
           }
         });
       })
@@ -391,7 +394,10 @@ const App = () => {
           });
           Object.entries(capabilities).forEach(([feature, info]) => {
             if (feature !== 'checkedAt' && 'status' in info) {
-              degradationStore.setFeatureStatus(feature as any, info.status);
+              // #807: isFeatureType narrows string key to FeatureType
+if ((Object.values(FeatureType) as string[]).includes(feature)) {
+              degradationStore.setFeatureStatus(feature as FeatureType, info.status);
+            }
             }
           });
         })
