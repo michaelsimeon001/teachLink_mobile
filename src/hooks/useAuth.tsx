@@ -93,7 +93,12 @@ export const AuthProvider = ({ children }: AuthProviderProps): React.ReactElemen
           status: (error as { response?: { status?: number } })?.response?.status,
         });
 
-        throw new Error(getAuthErrorMessage(authErrorCode));
+        // #804: authErrorCode may be absent (undefined/null) if the error
+        // response doesn't include an error field — provide a safe fallback.
+        const message = authErrorCode
+          ? getAuthErrorMessage(authErrorCode)
+          : 'Authentication failed. Please try again.';
+        throw new Error(message);
       }
     },
     [] // stable: credentials come in as an argument, not a dep

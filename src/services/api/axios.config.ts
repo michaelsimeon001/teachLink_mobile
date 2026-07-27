@@ -17,6 +17,25 @@ import { MUTATION_INVALIDATION_MAP } from '../../config/apiCacheConfig';
 import { SSL_PINNING } from '../../config/security';
 import { useAppStore } from '../../store';
 import { useConflictStore, type ConflictData } from '../../store/conflictStore';
+
+/**
+ * #806: Runtime shape validator for 409 conflict response bodies.
+ *
+ * Axios casts response.data to `ConflictData` at the TypeScript level, but
+ * provides no runtime guarantee. If the server changes its response format the
+ * cast silently yields `undefined` field accesses instead of a clear error.
+ * This guard validates the minimum structure before we read any field.
+ */
+function isConflictResponseShape(data: unknown): data is {
+  serverVersion?: unknown;
+  serverVersionNumber?: number;
+  localVersion?: unknown;
+  entityType?: string;
+  entityId?: string;
+  message?: string;
+} {
+  return data !== null && data !== undefined && typeof data === 'object';
+}
 import { appLogger } from '../../utils/logger';
 import { notifyEntry, startTiming } from '../../utils/performanceTiming';
 import { healthMetricsService } from '../healthMetrics';
@@ -424,16 +443,18 @@ apiClient.interceptors.response.use(
     // - entityId: identifier of the conflicting entity
 
     if (status === 409) {
-      const responseData = error.response?.data as
-        | {
-            serverVersion?: unknown;
-            serverVersionNumber?: number;
-            localVersion?: unknown;
-            entityType?: string;
-            entityId?: string;
-            message?: string;
+      // #806: validate response shape at runtime before accessing fields.
+      const rawData = error.response?.data;
+      const responseData = isConflictResponseShape(rawData) ? rawData : undefined;
+      if (rawData !== undefined && !isConflictResponseShape(rawData)) {
+        sentryContextService.captureException(
+          new Error('409 response body has unexpected shape'),
+          {
+            extra: { rawData: String(rawData).slice(0, 200) },
+            tags: { 'api.error': 'conflict_shape_mismatch' },
           }
-        | undefined;
+        );
+      }
 
       // Extract version metadata from request headers
       const clientVersionHeader = originalRequest.headers?.['X-Last-Known-Version'];
