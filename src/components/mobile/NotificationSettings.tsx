@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp } from 'lucide-react-native';
-import React, { memo, useState } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import {
     ScrollView,
     Switch,
@@ -62,28 +62,58 @@ export const NotificationSettings = () => {
 
   const isEnabled = permissionStatus === 'granted' && pushToken !== null;
 
-  const handlePreferenceChange = async (key: keyof NotificationPreferences, value: boolean) => {
-    try {
-      setSavingKey(key);
-      // Update local preferences (automatically persisted by Zustand)
-      setPreference(key, value);
+  const handlePreferenceChange = useCallback(
+    async (key: keyof NotificationPreferences, value: boolean) => {
+      try {
+        setSavingKey(key);
+        // Update local preferences (automatically persisted by Zustand)
+        setPreference(key, value);
 
-      // TODO: Sync with backend
-      // try {
-      //   await api.updateNotificationPreferences({ [key]: value });
-      // } catch (error) {
-      //   console.error('Failed to sync notification preferences:', error);
-      //   // Preferences are still saved locally even if sync fails
-      // }
-    } finally {
-      setSavingKey(null);
-    }
-  };
+        // TODO: Sync with backend
+        // try {
+        //   await api.updateNotificationPreferences({ [key]: value });
+        // } catch (error) {
+        //   console.error('Failed to sync notification preferences:', error);
+        //   // Preferences are still saved locally even if sync fails
+        // }
+      } finally {
+        setSavingKey(null);
+      }
+    },
+    [setPreference]
+  );
 
-  const handleToggleAdvancedNotifications = () => {
+  const handleToggleAdvancedNotifications = useCallback(() => {
     configureNext();
     setShowAdvancedNotifications(prev => !prev);
-  };
+  }, []);
+
+  // Stable callback refs for each notification preference — prevents
+  // breaking React.memo on SettingRow when NotificationSettings re-renders.
+  const handleCourseUpdatesChange = useCallback(
+    (value: boolean) => handlePreferenceChange('courseUpdates', value),
+    [handlePreferenceChange]
+  );
+
+  const handleMessagesChange = useCallback(
+    (value: boolean) => handlePreferenceChange('messages', value),
+    [handlePreferenceChange]
+  );
+
+  const handleLearningRemindersChange = useCallback(
+    (value: boolean) => handlePreferenceChange('learningReminders', value),
+    [handlePreferenceChange]
+  );
+
+  const handleAchievementUnlocksChange = useCallback(
+    (value: boolean) => handlePreferenceChange('achievementUnlocks', value),
+    [handlePreferenceChange]
+  );
+
+  const handleCommunityActivityChange = useCallback(
+    (value: boolean) => handlePreferenceChange('communityActivity', value),
+    [handlePreferenceChange]
+  );
 
   return (
     <ScrollView className="flex-1 bg-gray-50 dark:bg-gray-900" removeClippedSubviews={true}>
@@ -127,7 +157,7 @@ export const NotificationSettings = () => {
             title="Course Updates"
             description="New lessons, content updates, and announcements"
             value={preferences.courseUpdates}
-            onValueChange={value => handlePreferenceChange('courseUpdates', value)}
+            onValueChange={handleCourseUpdatesChange}
             disabled={!isEnabled}
           />
           <View className="mx-4 h-px bg-gray-200 dark:bg-gray-700" />
@@ -137,7 +167,7 @@ export const NotificationSettings = () => {
             title="Messages"
             description="Direct messages and chat notifications"
             value={preferences.messages}
-            onValueChange={value => handlePreferenceChange('messages', value)}
+            onValueChange={handleMessagesChange}
             disabled={!isEnabled}
           />
         </View>
@@ -179,7 +209,7 @@ export const NotificationSettings = () => {
               title="Learning Reminders"
               description="Daily reminders to keep your streak"
               value={preferences.learningReminders}
-              onValueChange={value => handlePreferenceChange('learningReminders', value)}
+              onValueChange={handleLearningRemindersChange}
               disabled={!isEnabled}
             />
             <View className="mx-4 h-px bg-gray-200 dark:bg-gray-700" />
@@ -189,7 +219,7 @@ export const NotificationSettings = () => {
               title="Achievement Unlocks"
               description="Celebrate when you unlock achievements"
               value={preferences.achievementUnlocks}
-              onValueChange={value => handlePreferenceChange('achievementUnlocks', value)}
+              onValueChange={handleAchievementUnlocksChange}
               disabled={!isEnabled}
             />
             <View className="mx-4 h-px bg-gray-200 dark:bg-gray-700" />
@@ -199,7 +229,7 @@ export const NotificationSettings = () => {
               title="Community Activity"
               description="Posts, comments, and community updates"
               value={preferences.communityActivity}
-              onValueChange={value => handlePreferenceChange('communityActivity', value)}
+              onValueChange={handleCommunityActivityChange}
               disabled={!isEnabled}
             />
           </View>

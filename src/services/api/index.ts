@@ -38,9 +38,11 @@ export const apiService = {
       )
     );
   },
-  post: (url: string, data: any) => apiClient.post(url, data),
-  put: (url: string, data: any) => apiClient.put(url, data),
-  delete: (url: string) => apiClient.delete(url),
+  /** #801: Generic response type so callers can infer the response shape. */
+  post: <T = unknown>(url: string, data: unknown) => apiClient.post<T>(url, data),
+  put: <T = unknown>(url: string, data: unknown) => apiClient.put<T>(url, data),
+  patch: <T = unknown>(url: string, data: unknown) => apiClient.patch<T>(url, data),
+  delete: <T = unknown>(url: string) => apiClient.delete<T>(url),
 };
 
 export { default as apiClient } from './axios.config';

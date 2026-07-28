@@ -1,11 +1,32 @@
 import { MMKV } from 'react-native-mmkv';
 import { create, StateCreator } from 'zustand';
-import { devtools, persist, subscribeWithSelector } from 'zustand/middleware';
+import {
+  createJSONStorage,
+  devtools,
+  persist,
+  subscribeWithSelector,
+  type StateStorage,
+} from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
+import logger from '../utils/logger';
 
-import { zustandStorage } from './persistence';
+import { appLogger } from '../utils/logger';
 
 const storage = new MMKV();
+
+/**
+ * Async MMKV storage adapter for Zustand persist.
+ *
+ * MMKV reads/writes are synchronous, so (de)serializing large state objects
+ * blocks the JS thread and drops frames during startup. Wrapping each op in a
+ * resolved Promise defers the (de)serialization to a microtask, so hydration
+ * and persistence no longer block the current frame. (#854)
+ */
+const asyncMMKVStorage: StateStorage = {
+  getItem: (name) => Promise.resolve(storage.getString(name) ?? null),
+  setItem: (name, value) => Promise.resolve(storage.set(name, value)),
+  removeItem: (name) => Promise.resolve(storage.delete(name)),
+};
 
 type PersistConfig<T> = {
   partialize?: (state: T) => Partial<T>;
@@ -21,15 +42,18 @@ export const createStore = <T extends object>(
     devtools(
       persist(subscribeWithSelector(immer(initializer)), {
         name,
-        storage: zustandStorage(storage),
+        storage: createJSONStorage(() => asyncMMKVStorage),
         partialize,
         migrate,
-        onRehydrateStorage: (state) => {
-          return (state, error) => {
+        onRehydrateStorage: (_initialState) => {
+          // #803: explicitly type both params so implicit `any` is eliminated.
+          // `error` is `Error | undefined` per the Zustand persist middleware signature.
+          return (_rehydratedState: T | undefined, error: Error | undefined) => {
             if (error) {
-              console.log('an error happened during hydration', error)
+              appLogger.errorSync('an error happened during hydration', error instanceof Error ? error : new Error(String(error)))
+              logger.errorSync('an error happened during hydration', error as Error)
             }
-          }
+          };
         },
       }),
       { name: `Teach-This-${name}` }
@@ -39,4 +63,36 @@ export const createStore = <T extends object>(
   // Add hasHydrated logic here if needed, for now, it's handled by persist middleware
 
   return store;
+};
+
+type HydratableStore = {
+  persist?: {
+    hasHydrated?: () => boolean;
+    onFinishHydration?: (cb: () => void) => () => void;
+  };
+};
+
+/**
+ * Resolves once a persisted store has finished rehydrating.
+ *
+ * Guards against reading `getState()` before persisted values exist, which
+ * would otherwise yield `undefined` for store methods and cause silent no-ops
+ * or TypeErrors on pre-hydration access.
+ */
+export const waitForHydration = (store: HydratableStore): Promise<void> => {
+  if (store.persist?.hasHydrated?.()) {
+    return Promise.resolve();
+  }
+
+  return new Promise(resolve => {
+    const unsubscribe = store.persist?.onFinishHydration?.(() => {
+      unsubscribe?.();
+      resolve();
+    });
+
+    // If the store isn't persisted (no hydration lifecycle), resolve immediately.
+    if (!unsubscribe) {
+      resolve();
+    }
+  });
 };

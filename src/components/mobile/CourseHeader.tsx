@@ -2,6 +2,8 @@ import React, { memo } from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 
 import { useDynamicFontSize } from '../../hooks/useDynamicFontSize';
+import { useAppStore } from '../../store';
+import { getColors } from '../../utils/colors';
 import { Course } from '../../types/course';
 import { AppText as Text } from '../common/AppText';
 import BookmarkButton from "./BookmarkButton";
@@ -17,20 +19,22 @@ interface CourseHeaderProps {
 const CourseHeader = memo(
   ({ course, overallProgress, isBookmarked, onBack, onBookmarkToggle }: CourseHeaderProps) => {
     const { scale } = useDynamicFontSize();
+    const theme = useAppStore(state => state.theme);
+    const colors = getColors(theme);
 
     return (
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: colors.card }]}>
         <View style={styles.headerContent}>
           {onBack && (
-            <TouchableOpacity onPress={onBack} style={styles.backButton}>
-              <Text style={styles.backButtonText}>←</Text>
+            <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Go back" accessibilityHint="Returns to the previous screen">
+              <Text style={[styles.backButtonText, { color: colors.secondary }]}>←</Text>
             </TouchableOpacity>
           )}
           <View style={styles.titleContainer}>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text style={[styles.title, { color: colors.primary }]} numberOfLines={1}>
               {course.title}
             </Text>
-            <Text style={styles.subtitle}>{overallProgress}% complete</Text>
+            <Text style={[styles.subtitle, { color: colors.secondary }]}>{overallProgress}% complete</Text>
           </View>
           <BookmarkButton
             isBookmarked={isBookmarked}
@@ -41,8 +45,8 @@ const CourseHeader = memo(
         </View>
 
         {/* Progress Bar */}
-        <View style={[styles.progressBarContainer, { height: scale(8) }]}>
-          <View style={[styles.progressBar, { width: `${overallProgress}%` }]} />
+        <View style={[styles.progressBarContainer, { height: scale(8), backgroundColor: colors.background }]}>
+          <View style={[styles.progressBar, { width: `${overallProgress}%`, backgroundColor: colors.accent }]} />
         </View>
       </View>
     );
@@ -57,7 +61,6 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
     shadowColor: '#000',
@@ -78,7 +81,6 @@ const styles = StyleSheet.create({
   },
   backButtonText: {
     fontSize: 24,
-    color: '#6b7280',
   },
   titleContainer: {
     flex: 1,
@@ -87,22 +89,18 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#111827',
   },
   subtitle: {
     fontSize: 12,
-    color: '#6b7280',
     fontWeight: '500',
     marginTop: 4,
   },
   progressBarContainer: {
     height: 8,
-    backgroundColor: '#e5e7eb',
     borderRadius: 4,
     overflow: 'hidden',
   },
   progressBar: {
     height: '100%',
-    backgroundColor: '#19c3e6',
   },
 });

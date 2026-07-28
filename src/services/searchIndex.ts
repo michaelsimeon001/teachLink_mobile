@@ -4,6 +4,7 @@ import { FilterValues } from '../components/mobile/FilterSheet';
 import { SearchResultItem } from '../components/mobile/SearchResultCard';
 import { Course } from '../types/course';
 import { appLogger } from '../utils/logger';
+import { normalizeText } from '../utils/stringUtils';
 import { buildTrie, Trie } from '../utils/trie';
 
 const INDEX_STORAGE_KEY = '@teachlink_search_index';
@@ -168,24 +169,24 @@ export function buildSearchIndex(courses: Course[]): PersistedSearchIndex {
     // Suggestions: full title and category phrases as well as individual words.
     suggestionSet.add(course.title);
     suggestionSet.add(course.category);
-    for (const t of tokenize(course.title)) suggestionSet.add(t);
+    for (const t of tokenize(normalizeText(course.title))) suggestionSet.add(t);
 
     // Title
-    const titleTokens = tokenize(course.title);
+    const titleTokens = tokenize(normalizeText(course.title));
     addWeightedTokens(entries, titleTokens, course.id, FIELD_WEIGHTS.title);
 
     // Category
-    for (const token of tokenize(course.category)) {
+    for (const token of tokenize(normalizeText(course.category))) {
       addEntry(entries, token, course.id, FIELD_WEIGHTS.category);
     }
 
     // Instructor name
-    for (const token of tokenize(course.instructor.name)) {
+    for (const token of tokenize(normalizeText(course.instructor.name))) {
       addEntry(entries, token, course.id, FIELD_WEIGHTS.instructor);
     }
 
     // Description (length-capped)
-    const descTokens = tokenize(course.description, MAX_DESC_TOKENS);
+    const descTokens = tokenize(normalizeText(course.description), MAX_DESC_TOKENS);
     addWeightedTokens(entries, descTokens, course.id, FIELD_WEIGHTS.description);
   }
 
@@ -274,7 +275,7 @@ export class SearchIndexService {
   search(query: string, filters: FilterValues = {}, maxResults = 50): SearchResultItem[] {
     if (!this.index || !this.tokenTrie) return [];
 
-    const tokens = tokenize(query);
+    const tokens = tokenize(normalizeText(query));
     if (tokens.length === 0) return [];
 
     const scoreMap = new Map<string, number>();
@@ -319,6 +320,38 @@ export class SearchIndexService {
 
     results.sort((a, b) => b.score - a.score);
     return results.slice(0, maxResults).map(r => r.item);
+  }
+
+  /**
+   * Compact the in-memory index by removing orphaned entries (tokens whose
+   * posting lists reference docs that no longer exist in the `docs` map).
+   * Rebuilds the token trie afterwards so prefix search remains correct.
+   *
+   * Called on memory pressure to reclaim memory without losing the search
+   * functionality.
+   */
+  compact(): void {
+    if (!this.index) return;
+
+    const start = Date.now();
+    const validDocIds = new Set(Object.keys(this.index.docs));
+    let removedTokens = 0;
+
+    for (const token of Object.keys(this.index.entries)) {
+      const filtered = this.index.entries[token].filter(e => validDocIds.has(e.docId));
+      if (filtered.length === 0) {
+        delete this.index.entries[token];
+        removedTokens++;
+      } else if (filtered.length !== this.index.entries[token].length) {
+        this.index.entries[token] = filtered;
+      }
+    }
+
+    this.tokenTrie = buildTrie(Object.keys(this.index.entries));
+
+    appLogger.infoSync(
+      `[SearchIndex] compacted: removed ${removedTokens} orphan tokens in ${Date.now() - start}ms`
+    );
   }
 
   /** Drop the in-memory index and remove the persisted copy. */

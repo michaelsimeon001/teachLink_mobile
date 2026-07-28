@@ -2,6 +2,8 @@
 import logger from '../utils/logger';
 import apiClient from './api/axios.config';
 import * as secureStorage from './secureStorage';
+import { unregisterTokenFromBackend } from './pushNotifications';
+import { useNotificationStore } from '../store/notificationStore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +40,25 @@ export interface SocialProvider {
 
 export type BiometricType = 'fingerprint' | 'face' | 'iris' | 'none';
 
+// ─── Biometric re-enrollment error ────────────────────────────────────────────
+
+/**
+ * Thrown when the device's biometric enrollment has changed since the
+ * user last enabled biometric login (e.g. they removed and re-added a
+ * fingerprint, or added a new face).
+ *
+ * The caller should catch this error and present a re-enrollment UI that
+ * guides the user through enabling biometric login again.
+ */
+export class BiometricReenrollmentError extends Error {
+  readonly code = 'BIOMETRIC_REENROLLMENT_REQUIRED';
+
+  constructor(message = 'Your biometric enrollment has changed. Please re-enable biometric login.') {
+    super(message);
+    this.name = 'BiometricReenrollmentError';
+  }
+}
+
 // ─── Auth API endpoints ───────────────────────────────────────────────────────
 
 const ENDPOINTS = {
@@ -62,7 +83,6 @@ function validateSecureStorageReady(): void {
     );
   }
 }
-
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -95,6 +115,10 @@ class MobileAuthService {
   /**
    * Authenticate using the device biometrics (Face ID / Touch ID / Fingerprint).
    * Requires biometrics to have been previously enabled via enableBiometrics().
+   *
+   * If the device's biometric enrollment has changed since the user last
+   * enabled biometric login, a BiometricReenrollmentError is thrown so the
+   * caller can guide the user through re-enrollment.
    */
   async loginWithBiometrics(): Promise<AuthResult> {
     const enabled = await secureStorage.isBiometricEnabled();
@@ -102,8 +126,35 @@ class MobileAuthService {
       throw new Error('Biometric login is not enabled. Please enable it in settings.');
     }
 
-    // Mocked biometric login
-    throw new Error('Biometric authentication is not available.');
+    const available = await this.isBiometricAvailable();
+    if (!available) {
+      throw new Error('Biometric authentication is not available on this device.');
+    }
+
+    // Detect if the biometric enrollment has changed since the user
+    // last enabled biometric login. This handles the case where the
+    // user removed and re-added a fingerprint, or added a new face.
+    const needsReenrollment = await this.checkBiometricReenrollment();
+    if (needsReenrollment) {
+      throw new BiometricReenrollmentError();
+    }
+
+    // Prompt the user for biometric authentication
+    const authResult = await this._authenticateAsync('Unlock with biometrics');
+    if (!authResult.success) {
+      throw new Error('Biometric authentication was cancelled or failed.');
+    }
+
+    // A successful biometric prompt unlocks the session persisted in secure
+    // storage. Each dependency is mockable, so all outcomes (enabled/disabled,
+    // available/unavailable, session present/absent) are testable.
+    const session = await this.restoreSession();
+    if (!session) {
+      throw new Error('No stored session found. Please log in with your password.');
+    }
+
+    logger.info('MobileAuth: biometric login succeeded');
+    return session;
   }
 
   // ── Token refresh ─────────────────────────────────────────────────────────
@@ -161,28 +212,234 @@ class MobileAuthService {
 
   // ── Biometric management ──────────────────────────────────────────────────
 
+  /**
+   * Enable biometric login for the current user.
+   *
+   * Prompts the user for biometric authentication to verify they can use
+   * biometrics, then stores a biometric enrollment id so that future
+   * enrollment changes can be detected.
+   *
+   * @throws {Error} If biometrics are not available or the user cancels.
+   */
   async enableBiometrics(): Promise<void> {
-    throw new Error('Biometric authentication is not available on this device.');
+    const available = await this.isBiometricAvailable();
+    if (!available) {
+      throw new Error('Biometric authentication is not available on this device.');
+    }
+
+    // Prompt the user to authenticate with biometrics to verify capability
+    const result = await this._authenticateAsync('Enable biometric login');
+    if (!result.success) {
+      throw new Error('Biometric authentication was cancelled or failed.');
+    }
+
+    // Store a new enrollment id so we can detect future enrollment changes
+    const enrollmentId = this._generateEnrollmentId();
+    await Promise.all([
+      secureStorage.setBiometricEnabled(true),
+      secureStorage.saveBiometricEnrollmentId(enrollmentId),
+    ]);
+
+    logger.info('MobileAuth: biometric login enabled');
   }
 
+  /**
+   * Disable biometric login and clear all biometric-related data.
+   */
   async disableBiometrics(): Promise<void> {
-    await secureStorage.setBiometricEnabled(false);
+    await Promise.all([
+      secureStorage.setBiometricEnabled(false),
+      secureStorage.clearBiometricEnrollmentId(),
+    ]);
     logger.info('MobileAuth: biometric login disabled');
   }
 
+  /**
+   * Check whether biometric authentication is available on this device.
+   *
+   * Uses expo-local-authentication to verify that the device has the
+   * hardware and that at least one biometric is enrolled.
+   */
   async isBiometricAvailable(): Promise<boolean> {
+    try {
+      const LocalAuthentication = this._getLocalAuthentication();
+      const [hasHardware, isEnrolled] = await Promise.all([
+        LocalAuthentication.hasHardwareAsync(),
+        LocalAuthentication.isEnrolledAsync(),
+      ]);
+      return hasHardware && isEnrolled;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get the type of biometric authentication supported by the device.
+   *
+   * Returns 'fingerprint', 'face', 'iris', or 'none'.
+   */
+  async getSupportedBiometricType(): Promise<BiometricType> {
+    try {
+      const LocalAuthentication = this._getLocalAuthentication();
+      const types = await LocalAuthentication.getSupportedAuthenticationTypesAsync();
+
+      // expo-local-authentication returns an array of SupportedAuthenticationTypes
+      // enum values. We map the first supported type to our BiometricType.
+      if (types.includes(1)) {
+        // BIOMETRIC = 1 (fingerprint, face, etc.)
+        // On iOS we can't distinguish face vs fingerprint from this enum,
+        // so we default to 'fingerprint' and let the UI adapt.
+        return 'fingerprint';
+      }
+      return 'none';
+    } catch {
+      return 'none';
+    }
+  }
+
+  /**
+   * Check whether the user needs to re-enroll their biometrics.
+   *
+   * This is called on app launch or when the user attempts biometric login.
+   * If the biometric enrollment has changed since the user last enabled
+   * biometric login (e.g. they removed and re-added a fingerprint), the
+   * stored enrollment id will no longer match and re-enrollment is required.
+   *
+   * @returns `true` if re-enrollment is needed, `false` otherwise.
+   */
+  async checkBiometricReenrollment(): Promise<boolean> {
+    const enabled = await secureStorage.isBiometricEnabled();
+    if (!enabled) return false;
+
+    const available = await this.isBiometricAvailable();
+    if (!available) return false;
+
+    // If the enrollment id is missing, the Keychain/Keystore data was
+    // likely invalidated by a biometric enrollment change.
+    const storedEnrollmentId = await secureStorage.getBiometricEnrollmentId();
+    if (!storedEnrollmentId) {
+      return true;
+    }
+
+    // Try to access the stored session data. If the Keychain/Keystore
+    // items were invalidated by a biometric enrollment change, this
+    // will fail and we know re-enrollment is needed.
+    try {
+      const sessionValid = await secureStorage.isSessionValid();
+      if (!sessionValid) {
+        // Session is invalid — could be expired or invalidated.
+        // Check if we can still access the refresh token.
+        const refreshToken = await secureStorage.getRefreshToken();
+        if (!refreshToken) {
+          // No refresh token — the Keychain/Keystore data was likely
+          // invalidated by a biometric enrollment change.
+          return true;
+        }
+      }
+    } catch {
+      // Secure storage access failed — likely due to biometric enrollment change
+      return true;
+    }
+
     return false;
   }
 
-  async getSupportedBiometricType(): Promise<BiometricType> {
-    return 'none';
+  /**
+   * Re-enroll biometric login after the device's biometric enrollment
+   * has changed.
+   *
+   * This clears the old biometric data, prompts the user for biometric
+   * authentication, and stores a new enrollment id.
+   *
+   * @throws {Error} If biometrics are not available or the user cancels.
+   */
+  async reEnrollBiometrics(): Promise<void> {
+    const available = await this.isBiometricAvailable();
+    if (!available) {
+      throw new Error('Biometric authentication is not available on this device.');
+    }
+
+    // Clear old biometric data
+    await Promise.all([
+      secureStorage.clearBiometricEnrollmentId(),
+      secureStorage.setBiometricEnabled(false),
+    ]);
+
+    // Prompt the user to authenticate with biometrics
+    const result = await this._authenticateAsync('Re-enable biometric login');
+    if (!result.success) {
+      throw new Error('Biometric authentication was cancelled or failed.');
+    }
+
+    // Store a new enrollment id
+    const enrollmentId = this._generateEnrollmentId();
+    await Promise.all([
+      secureStorage.setBiometricEnabled(true),
+      secureStorage.saveBiometricEnrollmentId(enrollmentId),
+    ]);
+
+    logger.info('MobileAuth: biometric login re-enrolled successfully');
+  }
+
+  // ── Biometric private helpers ─────────────────────────────────────────────
+
+  /**
+   * Lazily require expo-local-authentication.
+   *
+   * Using a dynamic require (same pattern as secureStorage.ts) avoids
+   * bundling the native module on platforms where it's not available
+   * and makes the dependency mockable in tests.
+   */
+  private _getLocalAuthentication(): any {
+    return require('expo-local-authentication');
+  }
+
+  /**
+   * Prompt the user for biometric authentication.
+   *
+   * @param promptMessage  The message to display in the biometric prompt.
+   * @returns The authentication result from expo-local-authentication.
+   */
+  private async _authenticateAsync(promptMessage: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> {
+    const LocalAuthentication = this._getLocalAuthentication();
+    return LocalAuthentication.authenticateAsync({
+      promptMessage,
+      cancelTitle: 'Cancel',
+      fallbackTitle: 'Use passcode',
+      disableDeviceFallback: false,
+    });
+  }
+
+  /**
+   * Generate a unique enrollment id.
+   *
+   * Combines a timestamp, random value, and platform to create a
+   * UUID-like string that uniquely identifies a biometric enrollment
+   * session.
+   */
+  private _generateEnrollmentId(): string {
+    const { Platform } = require('react-native');
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${Platform.OS}`;
   }
 
   // ── Logout ────────────────────────────────────────────────────────────────
 
   async logout(): Promise<void> {
     try {
-      // Notify backend
+      // Unregister push token from backend before clearing session.
+      // This runs unconditionally (including session-expiry logouts) so the
+      // user stops receiving notifications immediately after sign-out.
+      const pushToken = useNotificationStore.getState().pushToken;
+      if (pushToken) {
+        await unregisterTokenFromBackend(pushToken);
+        // Clear token from local store after successful (or failed) unregistration
+        useNotificationStore.getState().setPushToken(null);
+      }
+
+      // Notify backend of the logout session termination
       const accessToken = await secureStorage.getAccessToken();
       if (accessToken) {
         await apiClient

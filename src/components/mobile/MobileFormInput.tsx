@@ -49,7 +49,15 @@ interface MobileFormInputProps {
   onBlur?: TextInputProps['onBlur'];
 }
 
-export const MobileFormInput: React.FC<MobileFormInputProps> = ({
+/**
+ * MobileFormInput — wrapped in React.memo to prevent re-renders on every
+ * keystroke in multi-field forms.
+ *
+ * ⚠️  Call-site requirement: pass `onChangeText` wrapped in `useCallback` so
+ * the memo comparison stays stable and sibling inputs are not re-rendered when
+ * only one field changes.
+ */
+const MobileFormInputBase: React.FC<MobileFormInputProps> = ({
   label,
   value,
   onChangeText,
@@ -233,3 +241,11 @@ export const MobileFormInput: React.FC<MobileFormInputProps> = ({
     </View>
   );
 };
+
+/**
+ * Named export for backwards compatibility — points to the memoised component.
+ * Callers that already used `{ MobileFormInput }` continue to work unchanged.
+ */
+export const MobileFormInput = React.memo(MobileFormInputBase);
+
+export default MobileFormInput;

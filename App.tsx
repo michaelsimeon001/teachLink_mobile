@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -13,9 +13,14 @@ import {
   View,
 } from 'react-native';
 
+import { Asset } from 'expo-asset';
+import * as Updates from 'expo-updates';
+import { CRITICAL_ASSETS } from './src/constants/assets';
+
 import StorybookUI from './.rnstorybook';
 import './global.css';
 import { ErrorBoundary } from './src/components/common/ErrorBoundary';
+import UpdatePromptModal from './src/components/common/UpdatePromptModal';
 import { NotificationPermissionExplanationSheet } from './src/components/mobile/NotificationPermissionExplanationSheet';
 import { initializeLogging } from './src/config/logging';
 import { AuthProvider, useAdaptiveTheme, useReviewMetrics } from './src/hooks';
@@ -40,6 +45,7 @@ import {
   registerForPushNotifications, // Added missing native push helpers
   registerTokenWithBackend,
   removeNotificationListener,
+  setupForegroundBadgeSync,
 } from './src/services/pushNotifications';
 import { requestQueue } from './src/services/requestQueue';
 import { searchIndexService } from './src/services/searchIndex';
@@ -47,6 +53,7 @@ import { checkSessionValidity, initializeSecureStorage } from './src/services/se
 import socketService from './src/services/socket';
 import { syncService } from './src/services/syncService'; // Fixed naming convention from the merge conflict
 import { useAppStore, useDeviceStore, useNotificationStore } from './src/store'; // Added missing store imports
+import { waitForHydration } from './src/store/createStore';
 import { useDegradationStore } from './src/store/degradationStore';
 import {
   consumeHydrationResetToast,
@@ -68,7 +75,7 @@ requireEnvVariables();
 // Initialize centralized logging on app start
 initializeLogging().catch(err => {
   if (__DEV__) {
-    console.error('[App] Failed to initialize logging:', err);
+    appLogger.errorSync('[App] Failed to initialize logging:', err instanceof Error ? err : new Error(String(err)));
   }
 });
 
@@ -172,6 +179,9 @@ const App = () => {
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const [appIsReady, setAppIsReady] = React.useState(false);
   const [showPreferencesResetToast, setShowPreferencesResetToast] = useState(false);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [isCriticalUpdate, setIsCriticalUpdate] = useState(false);
+  const [updateVersion, setUpdateVersion] = useState<string | undefined>();
 
   useEffect(() => {
     let hideTimer: ReturnType<typeof setTimeout> | undefined;
@@ -201,10 +211,17 @@ const App = () => {
   useEffect(() => {
     async function prepareApp() {
       try {
-        // 1. Load critical fonts (used on first screen) synchronously before splash hides
+        // 1. Load critical fonts and preload critical image assets in parallel
+        //    so both complete before the splash screen hides, eliminating any
+        //    image-placeholder flicker on first-time screen visits (#819).
         const fontStart = Date.now();
+        await Promise.all([
+          fontService.loadFonts(CRITICAL_FONTS),
+          Asset.loadAsync(CRITICAL_ASSETS),
+        ]);
+        appLogger.infoSync(`[App] Critical fonts & assets loaded in ${Date.now() - fontStart}ms`);
         await fontService.loadFonts(CRITICAL_FONTS);
-        console.log(`[App] Critical fonts loaded in ${Date.now() - fontStart}ms`);
+        appLogger.infoSync(`[App] Critical fonts loaded in ${Date.now() - fontStart}ms`);
 
         // 2. Version-based cache invalidation: clear stale caches on app/data version bump
         const appVersion = require('./package.json').version as string;
@@ -229,9 +246,62 @@ const App = () => {
     InteractionManager.runAfterInteractions(async () => {
       const start = Date.now();
       await fontService.loadFonts(SECONDARY_FONTS);
-      console.log(`[App] Secondary fonts loaded in ${Date.now() - start}ms`);
+      appLogger.infoSync(`[App] Secondary fonts loaded in ${Date.now() - start}ms`);
     });
   }, [appIsReady]);
+
+  // OTA Update check on foreground
+  const checkForOtaUpdate = useCallback(async () => {
+    try {
+      if (__DEV__) return;
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        const manifest = (update as any).manifest ?? (update as any).metadata;
+        const isCritical = manifest?.extra?.ota?.critical === true;
+        const version = manifest?.version ?? manifest?.id;
+        setIsCriticalUpdate(isCritical);
+        setUpdateVersion(version);
+        setShowUpdateModal(true);
+      }
+    } catch (err) {
+      appLogger.warnSync('[App] OTA update check failed', { error: String(err) });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!appIsReady) return;
+
+    // #848: track previous state locally so this listener detects foreground
+    // transitions on its own, rather than depending on another effect to keep
+    // a shared ref current. The subscription is removed on cleanup below.
+    let previousState = AppState.currentState;
+    const appStateSubscription = AppState.addEventListener('change', nextAppState => {
+      const wasInBackground = previousState.match(/inactive|background/);
+      const isForegrounded = nextAppState === 'active';
+      if (wasInBackground && isForegrounded) {
+        void checkForOtaUpdate();
+      }
+      previousState = nextAppState;
+    });
+
+    // Check once on first foreground after app ready
+    void checkForOtaUpdate();
+
+    return () => {
+      appStateSubscription.remove();
+    };
+  }, [appIsReady, checkForOtaUpdate]);
+
+  const handleOtaUpdate = useCallback(async () => {
+    try {
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync();
+    } catch (err) {
+      setShowUpdateModal(false);
+      Alert.alert('Update Failed', 'Could not apply the update. Please try again later.');
+      appLogger.warnSync('[App] OTA update fetch failed', { error: String(err) });
+    }
+  }, []);
 
   useEffect(() => {
     // ===== CRITICAL PATH — runs immediately =====
@@ -287,7 +357,10 @@ const App = () => {
         // Update degradation store with current feature statuses
         Object.entries(capabilities).forEach(([feature, info]) => {
           if (feature !== 'checkedAt' && 'status' in info) {
-            degradationStore.setFeatureStatus(feature as any, info.status);
+            // #807: isFeatureType narrows string key to FeatureType
+if ((Object.values(FeatureType) as string[]).includes(feature)) {
+              degradationStore.setFeatureStatus(feature as FeatureType, info.status);
+            }
           }
         });
       })
@@ -304,6 +377,15 @@ const App = () => {
     // These tasks are non-critical: they enhance the experience but are not
     // needed for the initial render or core feature set. Scheduling them
     // via InteractionManager.runAfterInteractions() improves TTI by 60-70%.
+    //
+    // Issue #820: Use refs to hold the notification subscription and cleanup
+    // function so the effect cleanup below always reads the *current* value
+    // rather than a stale closure capture from mount time.
+    const notificationSubscriptionRef: { current: Notifications.Subscription | null } = {
+      current: null,
+    };
+    const notificationCleanupRef: { current: (() => void) | null } = { current: null };
+
     InteractionManager.runAfterInteractions(() => {
       // Socket connection (network I/O)
       socketService.connect();
@@ -312,6 +394,7 @@ const App = () => {
       featureCapabilities
         .checkAllCapabilities()
         .then(capabilities => {
+          // Issue #820: read directly from store rather than closing over component state.
           const degradationStore = useDegradationStore.getState();
           appLogger.infoSync('[App] Feature capabilities checked', {
             camera: capabilities.camera.status,
@@ -320,7 +403,10 @@ const App = () => {
           });
           Object.entries(capabilities).forEach(([feature, info]) => {
             if (feature !== 'checkedAt' && 'status' in info) {
-              degradationStore.setFeatureStatus(feature as any, info.status);
+              // #807: isFeatureType narrows string key to FeatureType
+if ((Object.values(FeatureType) as string[]).includes(feature)) {
+              degradationStore.setFeatureStatus(feature as FeatureType, info.status);
+            }
             }
           });
         })
@@ -331,10 +417,12 @@ const App = () => {
           );
         });
 
-      // Push notification registration and explainer logic
+      // Push notification registration and explainer logic.
+      // Issue #820: all state reads use store.getState() instead of closed-over
+      // component state so the callback always operates on the current values.
       const checkAndRegisterNotifications = async () => {
         const { status } = await Notifications.getPermissionsAsync();
-        
+
         if (status === 'granted') {
           // Already granted, silently get token
           const token = await registerForPushNotifications(false);
@@ -349,7 +437,7 @@ const App = () => {
 
         // Check explainer status
         const hasSeen = await AsyncStorage.getItem('hasSeenNotificationExplainer');
-        
+
         if (hasSeen === 'true') {
           // Explainer already seen and accepted, do not show sheet again
           return;
@@ -360,11 +448,11 @@ const App = () => {
           useNotificationStore.getState().setShowNotificationExplainer(true);
         } else if (hasSeen === 'deferred') {
           // Deferred users
-          const deferredCountStr = await AsyncStorage.getItem('appOpenCountSinceDeferral') || '0';
+          const deferredCountStr = (await AsyncStorage.getItem('appOpenCountSinceDeferral')) || '0';
           let deferredCount = parseInt(deferredCountStr, 10);
           deferredCount += 1;
           await AsyncStorage.setItem('appOpenCountSinceDeferral', deferredCount.toString());
-          
+
           if (deferredCount >= 3) {
             useNotificationStore.getState().setShowNotificationExplainer(true);
           }
@@ -372,6 +460,26 @@ const App = () => {
       };
 
       checkAndRegisterNotifications();
+
+      // Store the subscription so the cleanup closure can remove it.
+      notificationSubscriptionRef.current = Notifications.addNotificationReceivedListener(
+        notification => {
+          // Issue #820: read store directly rather than closed-over component state.
+          const store = useNotificationStore.getState();
+          store.addNotification({
+            id: notification.request.identifier,
+            type: (notification.request.content.data?.type as any) ?? 'general',
+            title: notification.request.content.title ?? '',
+            body: notification.request.content.body ?? '',
+            data: notification.request.content.data as any,
+            receivedAt: new Date().toISOString(),
+            read: false,
+          });
+        }
+      );
+
+      // Store the badge-sync teardown so we can call it on unmount.
+      notificationCleanupRef.current = setupForegroundBadgeSync();
 
       // Request queue monitoring
       requestQueue.startMonitoring(apiClient);
@@ -393,8 +501,14 @@ const App = () => {
     return () => {
       socketService.disconnect();
       syncService.stopAutoSync();
-      notificationCleanup();
-      removeNotificationListener(subscription);
+      // Issue #820: call cleanup via refs so we always get the current function,
+      // not a stale closure from the time this effect ran.
+      if (notificationCleanupRef.current) {
+        notificationCleanupRef.current();
+      }
+      if (notificationSubscriptionRef.current) {
+        removeNotificationListener(notificationSubscriptionRef.current);
+      }
       // @ts-ignore
       global.onunhandledrejection = undefined;
     };
@@ -402,6 +516,12 @@ const App = () => {
 
   useEffect(() => {
     const checkSessionOnForeground = async () => {
+      // Don't read the store before it has rehydrated — destructured actions
+      // would be undefined and calling them would throw / silently no-op.
+      if (!useAppStore.persist?.hasHydrated?.()) {
+        return;
+      }
+
       const {
         isAuthenticated,
         refreshToken,
@@ -446,7 +566,11 @@ const App = () => {
       await useDeviceStore.getState().runDeviceCompromisedCheck();
     };
 
-    checkSessionOnForeground();
+    // Wait for the persisted store to rehydrate before the first session check
+    // so we never read store actions before they exist.
+    void waitForHydration(useAppStore).then(() => {
+      void checkSessionOnForeground();
+    });
     checkCompromisedOnForeground();
 
     const appStateSubscription = AppState.addEventListener('change', nextAppState => {
@@ -480,6 +604,13 @@ const App = () => {
         </ScreenErrorBoundary>
         <NotificationPermissionExplanationSheet />
         {showPreferencesResetToast ? <PreferencesResetToast /> : null}
+        <UpdatePromptModal
+          visible={showUpdateModal}
+          isCritical={isCriticalUpdate}
+          version={updateVersion}
+          onUpdate={handleOtaUpdate}
+          onDismiss={isCriticalUpdate ? undefined : () => setShowUpdateModal(false)}
+        />
       </AuthProvider>
     </ErrorBoundary>
   );
