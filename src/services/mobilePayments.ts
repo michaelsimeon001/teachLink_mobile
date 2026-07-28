@@ -189,8 +189,7 @@ class MobilePaymentsService {
 
         store.setReceiptValidationPending(true);
         try {
-          // SAFE: Explicit check for platform type instead of assertion
-          const platform = Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'ios';
+          const platform = this._getPlatform();
 
           const result = await this.validateReceipt(receipt, platform, purchase.productId);
 
@@ -288,7 +287,7 @@ class MobilePaymentsService {
         expiresAt: new Date(
           Date.now() + (plan.period === 'monthly' ? 30 : 365) * 24 * 60 * 60 * 1000
         ).toISOString(),
-        platform: Platform.OS as 'ios' | 'android',
+        platform: this._getPlatform(),
       };
 
       await this._savePurchaseRecord(record);
@@ -319,7 +318,7 @@ class MobilePaymentsService {
         type: 'one_time',
         status: 'completed',
         purchasedAt: new Date().toISOString(),
-        platform: Platform.OS as 'ios' | 'android',
+        platform: this._getPlatform(),
       };
 
       await this._savePurchaseRecord(record);
@@ -347,7 +346,7 @@ class MobilePaymentsService {
         if (receipt) {
           const result = await this.validateReceipt(
             receipt,
-            Platform.OS as 'ios' | 'android',
+            this._getPlatform(),
             purchase.productId
           );
           if (result.valid) {
@@ -364,7 +363,7 @@ class MobilePaymentsService {
               purchasedAt: purchase.transactionDate
                 ? new Date(purchase.transactionDate).toISOString()
                 : new Date().toISOString(),
-              platform: Platform.OS as 'ios' | 'android',
+              platform: this._getPlatform(),
               receiptData: receipt,
             });
             await IAP.finishTransaction({ purchase, isConsumable: false });
@@ -493,6 +492,14 @@ class MobilePaymentsService {
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────
+
+  private _getPlatform(): 'ios' | 'android' {
+    if (Platform.OS === 'ios') return 'ios';
+    if (Platform.OS === 'android') return 'android';
+    throw new Error(
+      `Unsupported platform: ${Platform.OS}. In-app purchases require iOS or Android.`
+    );
+  }
 
   private _throwIfDeviceCompromised(): void {
     if (useDeviceStore.getState().isDeviceCompromised) {
