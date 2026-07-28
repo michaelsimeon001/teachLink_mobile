@@ -494,7 +494,9 @@ if ((Object.values(FeatureType) as string[]).includes(feature)) {
       warmCriticalCaches();
 
       // Build the offline search index from cached/fetched course data.
-      searchIndexService.initialize();
+      searchIndexService.initialize().catch((err: unknown) => {
+        appLogger.errorSync('[App] searchIndexService.initialize failed', err as Error);
+      });
     });
 
     // Cleanup on unmount
