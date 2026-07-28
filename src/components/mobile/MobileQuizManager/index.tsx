@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAnalytics } from '../../../hooks/useAnalytics';
@@ -268,6 +268,7 @@ export default function MobileQuizManager({
         </ScrollView>
       </SafeAreaView>
     );
+  }
 
   // Render resume prompt modal
   if (showResumePrompt) {

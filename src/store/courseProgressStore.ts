@@ -15,6 +15,26 @@ import type { Lesson } from '../types/course';
 const LESSON_WINDOW_RADIUS = 2;
 const LESSON_PAGE_SIZE = LESSON_WINDOW_RADIUS * 2 + 1; // 5 lessons per fetch
 
+export class InvalidLessonProgressError extends Error {
+  constructor(message = 'Invalid lesson progress data: missing or invalid required fields.') {
+    super(message);
+    this.name = 'InvalidLessonProgressError';
+  }
+}
+
+export function isValidLessonProgress(data: Partial<LessonProgress>): data is LessonProgress {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    typeof data.lessonId === 'string' &&
+    data.lessonId.trim().length > 0 &&
+    typeof data.completed === 'boolean' &&
+    typeof data.lastPosition === 'number' &&
+    typeof data.timeSpent === 'number' &&
+    typeof data.completedAt === 'string'
+  );
+}
+
 interface CourseProgressState {
   // keyed by courseId
   progressMap: Record<string, CourseProgress>;
@@ -88,6 +108,22 @@ export const useCourseProgressStore = create<CourseProgressState>()(
         getCourseProgress: courseId => get().progressMap[courseId] ?? null,
 
         markLessonComplete: (courseId, lessonId, totalLessons, lessonData) => {
+          const candidateProgress: Partial<LessonProgress> = {
+            lessonId,
+            completed: true,
+            lastPosition: 0,
+            timeSpent: 0,
+            completedAt: new Date().toISOString(),
+            ...lessonData,
+          };
+
+          if (!isValidLessonProgress(candidateProgress)) {
+            throw new InvalidLessonProgressError(
+              'Failed to update course progress: lessonData is missing required fields.'
+            );
+          }
+
+          const lessonProgress: LessonProgress = candidateProgress;
           // ── Deduplication guard ───────────────────────────────────────────
           // A 500 ms window prevents duplicate completion records when multiple
           // triggers fire for the same lesson (e.g., video-end + manual skip).
@@ -112,15 +148,6 @@ export const useCourseProgressStore = create<CourseProgressState>()(
           set(s => {
             const existing = s.progressMap[courseId];
             if (!existing) return s;
-
-            const lessonProgress: LessonProgress = {
-              lessonId,
-              completed: true,
-              lastPosition: 0,
-              timeSpent: 0,
-              completedAt: new Date().toISOString(),
-              ...lessonData,
-            };
 
             const updatedLessons = { ...existing.lessons, [lessonId]: lessonProgress };
             const completedLessons = Object.values(updatedLessons).filter(l => l.completed).length;

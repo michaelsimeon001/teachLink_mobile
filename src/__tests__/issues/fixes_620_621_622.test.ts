@@ -24,13 +24,14 @@ jest.mock('../../utils/imageOptimization', () => ({
     dpr: 1,
   })),
 }));
+import { renderHook } from '@testing-library/react-native';
+import React from 'react';
+import { Animated } from 'react-native';
+import { clearCache, getCache, invalidateByPattern, setCache } from '../../services/api/cache';
+
 jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), warn: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));
-
-import React from 'react';
-import { renderHook } from '@testing-library/react-hooks';
-import { Animated } from 'react-native';
 
 describe('#621 CachedImage — Animated.Value reference stability', () => {
   it('opacity ref is identical across multiple renders (Object.is)', () => {
@@ -64,11 +65,10 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 jest.mock('../../services/mobileAnalytics', () => ({
   mobileAnalyticsService: { trackEvent: jest.fn() },
 }));
+
 jest.mock('../../utils/trackingEvents', () => ({
   AnalyticsEvent: { PERFORMANCE_METRIC: 'performance_metric' },
 }));
-
-import { setCache, getCache, invalidateByPattern, clearCache } from '../../services/api/cache';
 
 describe('#620 invalidateByPattern', () => {
   beforeEach(() => clearCache());
