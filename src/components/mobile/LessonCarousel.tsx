@@ -11,7 +11,9 @@ import {
 } from 'react-native';
 
 import { useDeviceUiComplexity } from '../../hooks/useDeviceUiComplexity';
+import { useAppStore } from '../../store';
 import { useSettingsStore } from '../../store/settingsStore';
+import { getColors } from '../../utils/colors';
 import { CourseProgress, Lesson } from '../../types/course';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -37,6 +39,8 @@ const LessonCarousel = ({
   isLastLessonInSection = false,
 }: LessonCarouselProps) => {
   const dataSaverEnabled = useSettingsStore(state => state.dataSaverEnabled);
+  const theme = useAppStore(state => state.theme);
+  const colors = getColors(theme);
   const flatListRef = useRef<FlatList<Lesson>>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const progressBarWidth = useRef(new Animated.Value(0)).current;
@@ -109,14 +113,14 @@ const LessonCarousel = ({
   }
 
   return (
-    <View style={styles.container} testID="LessonCarousel">
-      <View style={styles.progressBarContainer}>
+    <View style={[styles.container, { backgroundColor: colors.background }]} testID="LessonCarousel">
+      <View style={[styles.progressBarContainer, { backgroundColor: colors.background }]}>
         <Animated.View style={{ width: progressBarWidth, height: '100%' }}>
           {shouldDisableHeavyEffects ? (
-            <View style={[styles.progressBarGradient, { backgroundColor: '#20afe7' }]} />
+            <View style={[styles.progressBarGradient, { backgroundColor: colors.accent }]} />
           ) : (
             <LinearGradient
-              colors={['#20afe7', '#2c8aec', '#586ce9']}
+              colors={[colors.accent, '#2c8aec', '#586ce9']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.progressBarGradient}
@@ -125,7 +129,7 @@ const LessonCarousel = ({
         </Animated.View>
       </View>
 
-      <View style={styles.indicatorsContainer}>
+      <View style={[styles.indicatorsContainer, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <View style={styles.indicatorsRow}>
           {lessons.map((lesson, index) => {
             const isCompleted = progress?.lessons[lesson.id]?.completed;
@@ -134,26 +138,28 @@ const LessonCarousel = ({
             return (
               <View
                 key={lesson.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Lesson ${index + 1}: ${lesson.title}${isCompleted ? ', completed' : ''}${isCurrent ? ', current' : ''}`}
                 style={[
                   styles.indicator,
-                  isCurrent && styles.indicatorCurrent,
-                  isCompleted && !isCurrent && styles.indicatorCompleted,
+                  isCurrent && [styles.indicatorCurrent, { backgroundColor: colors.accent }],
+                  isCompleted && !isCurrent && [styles.indicatorCompleted, { backgroundColor: '#10b981' }],
                 ]}
               />
             );
           })}
         </View>
-        <Text style={styles.indicatorText}>
+        <Text style={[styles.indicatorText, { color: colors.secondary }]}>
           {currentIndex + 1} / {lessons.length}
         </Text>
       </View>
 
-      <View style={styles.titleContainer}>
-        <Text style={styles.titleText}>{currentLesson.title}</Text>
+      <View style={[styles.titleContainer, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+        <Text style={[styles.titleText, { color: colors.primary }]}>{currentLesson.title}</Text>
         {progress?.lessons[currentLesson.id]?.completed && (
           <View style={styles.completedBadge}>
-            <View style={styles.completedDot} />
-            <Text style={styles.completedText}>✓ Completed</Text>
+            <View style={[styles.completedDot, { backgroundColor: '#10b981' }]} />
+            <Text style={[styles.completedText, { color: '#10b981' }]}>✓ Completed</Text>
           </View>
         )}
       </View>
@@ -179,7 +185,7 @@ const LessonCarousel = ({
         testID="LessonCarouselList"
       />
 
-      <View style={styles.navigationContainer}>
+      <View style={[styles.navigationContainer, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
         <TouchableOpacity
           onPress={() => {
             if (currentIndex === 0) return;
@@ -191,31 +197,39 @@ const LessonCarousel = ({
           disabled={currentIndex === 0}
           style={[
             styles.navButton,
-            styles.previousButton,
+            [styles.previousButton, { backgroundColor: colors.background, borderColor: colors.border }],
             currentIndex === 0 && styles.navButtonDisabled,
           ]}
+          accessibilityRole="button"
+          accessibilityLabel="Previous lesson"
+          accessibilityHint="Go to the previous lesson"
+          accessibilityState={{ disabled: currentIndex === 0 }}
         >
-          <Text style={[styles.navButtonText, currentIndex === 0 && styles.navButtonTextDisabled]}>
+          <Text style={[styles.navButtonText, { color: colors.primary }, currentIndex === 0 && styles.navButtonTextDisabled]}>
             ← Previous
           </Text>
         </TouchableOpacity>
 
         {currentIndex === lessons.length - 1 ? (
-          <TouchableOpacity onPress={onLastLessonNext} style={styles.navButton}>
+          <TouchableOpacity onPress={onLastLessonNext} style={styles.navButton}
+            accessibilityRole="button"
+            accessibilityLabel={isLastLessonInSection ? 'Continue' : 'Next lesson'}
+            accessibilityHint={isLastLessonInSection ? 'Continue to next section' : 'Go to the next lesson'}
+          >
             {shouldDisableHeavyEffects ? (
-              <View style={[styles.nextButtonGradient, { backgroundColor: '#20afe7' }]}>
-                <Text style={styles.nextButtonText}>
+              <View style={[styles.nextButtonGradient, { backgroundColor: colors.accent }]}>
+                <Text style={[styles.nextButtonText, { color: '#ffffff' }]}>
                   {isLastLessonInSection ? 'Continue →' : 'Next →'}
                 </Text>
               </View>
             ) : (
               <LinearGradient
-                colors={['#20afe7', '#2c8aec', '#586ce9']}
+                colors={[colors.accent, '#2c8aec', '#586ce9']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.nextButtonGradient}
               >
-                <Text style={styles.nextButtonText}>
+                <Text style={[styles.nextButtonText, { color: '#ffffff' }]}>
                   {isLastLessonInSection ? 'Continue →' : 'Next →'}
                 </Text>
               </LinearGradient>
@@ -231,19 +245,22 @@ const LessonCarousel = ({
               onLessonChange(lessons[nextIndex].id, nextIndex);
             }}
             style={styles.navButton}
+            accessibilityRole="button"
+            accessibilityLabel="Next lesson"
+            accessibilityHint="Go to the next lesson"
           >
             {shouldDisableHeavyEffects ? (
-              <View style={[styles.nextButtonGradient, { backgroundColor: '#20afe7' }]}>
-                <Text style={styles.nextButtonText}>Next →</Text>
+              <View style={[styles.nextButtonGradient, { backgroundColor: colors.accent }]}>
+                <Text style={[styles.nextButtonText, { color: '#ffffff' }]}>Next →</Text>
               </View>
             ) : (
               <LinearGradient
-                colors={['#20afe7', '#2c8aec', '#586ce9']}
+                colors={[colors.accent, '#2c8aec', '#586ce9']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.nextButtonGradient}
               >
-                <Text style={styles.nextButtonText}>Next →</Text>
+                <Text style={[styles.nextButtonText, { color: '#ffffff' }]}>Next →</Text>
               </LinearGradient>
             )}
           </TouchableOpacity>
@@ -256,11 +273,9 @@ const LessonCarousel = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0f1f5',
   },
   progressBarContainer: {
     height: 4,
-    backgroundColor: '#e5e7eb',
     overflow: 'hidden',
   },
   progressBarGradient: {
@@ -273,9 +288,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
   },
   indicatorsRow: {
     flexDirection: 'row',
@@ -292,28 +305,22 @@ const styles = StyleSheet.create({
     width: 32,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#19c3e6',
   },
   indicatorCompleted: {
-    backgroundColor: '#10b981',
   },
   indicatorText: {
     marginLeft: 16,
     fontSize: 14,
     fontWeight: '600',
-    color: '#6b7280',
   },
   titleContainer: {
     paddingHorizontal: 16,
     paddingVertical: 16,
-    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
   },
   titleText: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#111827',
     lineHeight: 28,
   },
   completedBadge: {
@@ -325,17 +332,14 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#10b981',
     marginRight: 8,
   },
   completedText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#10b981',
   },
   lessonContainer: {
     flex: 1,
-    backgroundColor: '#f0f1f5',
   },
   lessonContent: {
     padding: 16,
@@ -347,9 +351,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
     gap: 12,
   },
   navButton: {
@@ -361,12 +363,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   previousButton: {
-    backgroundColor: '#f3f4f6',
     borderWidth: 1,
-    borderColor: '#d1d5db',
   },
   navButtonDisabled: {
-    backgroundColor: '#e5e7eb',
     opacity: 0.5,
   },
   nextButtonGradient: {
@@ -380,7 +379,6 @@ const styles = StyleSheet.create({
   navButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#374151',
   },
   navButtonTextDisabled: {
     color: '#9ca3af',
@@ -388,16 +386,13 @@ const styles = StyleSheet.create({
   nextButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#ffffff',
   },
   emptyContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f0f1f5',
   },
   emptyText: {
-    color: '#6b7280',
     fontSize: 16,
   },
 });

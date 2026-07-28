@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -16,11 +17,11 @@ const SettingsScreen = () => {
   const router = useRouter();
   const { logout } = useAppStore();
 
-  const handleSignOut = async () => {
+  const handleSignOut = useCallback(async () => {
     await mobileAuthService.logout();
     logout();
     router.replace('/');
-  };
+  }, [logout, router]);
 
   return (
     <SafeAreaView style={{ flex: 1 }} edges={['top']}>

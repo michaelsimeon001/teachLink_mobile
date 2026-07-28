@@ -172,7 +172,7 @@ export const useInAppPurchase = (): UseInAppPurchase => {
       if (restored.length === 0) {
         return {
           count: 0,
-          message: 'No previous purchases found for this account.',
+          message: 'No purchases found to restore.',
         };
       }
       return {

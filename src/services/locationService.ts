@@ -8,13 +8,28 @@
  *
  * Gracefully degrades to manual entry if GPS unavailable
  * No errors thrown - always falls back to manual entry
+ *
+ * Security (#591): the service also monitors for OS-level location permission
+ * revocation. When a user turns off location access from Settings while the app
+ * is running, the active position watcher is stopped, cached/stored coordinates
+ * are cleared, and permission state is flipped to false so no stale location
+ * data is ever served.
  */
 
+import { AppState, AppStateStatus } from 'react-native';
 import * as Location from 'expo-location';
 
 import { featureCapabilities, FeatureStatus, FeatureType } from './featureCapabilities';
 import { useDegradationStore } from '../store/degradationStore';
+import { useLocationStore } from '../store/locationStore';
 import { appLogger } from '../utils/logger';
+
+/**
+ * How often (ms) to re-check OS permission while a watcher is active. Combined
+ * with the AppState 'active' listener this guarantees revocation is detected
+ * within a few seconds even if the app is never backgrounded.
+ */
+const PERMISSION_POLL_INTERVAL_MS = 3000;
 
 export enum LocationSourceType {
   GPS = 'gps',
@@ -36,6 +51,12 @@ class LocationService {
   private static instance: LocationService;
   private cachedLocation: LocationData | null = null;
   private locationPermissionStatus: Location.PermissionStatus | null = null;
+
+  // #591 — position watcher + permission-revoke monitoring
+  private watchSubscription: Location.LocationSubscription | null = null;
+  private appStateSubscription: { remove: () => void } | null = null;
+  private permissionPollTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPermissionGranted = false;
 
   private constructor() {}
 
@@ -99,7 +120,7 @@ class LocationService {
   public async getCurrentLocation(): Promise<LocationData | null> {
     try {
       // Check permission
-      const hasPermission = this.locationPermissionStatus === 'granted' || await this.checkPermission();
+      const hasPermission = this.locationPermissionStatus === 'granted' || (await this.checkPermission());
       if (!hasPermission) {
         appLogger.infoSync('[LocationService] Location permission not granted - GPS unavailable');
         featureCapabilities.getFeatureInfo(FeatureType.LOCATION);
@@ -261,6 +282,184 @@ class LocationService {
       default:
         return 'Location unavailable - please enter manually';
     }
+  }
+
+  // ─── #591: position watcher + OS-level permission-revoke handling ──────────
+
+  /**
+   * Start a continuous position watcher and begin monitoring for OS-level
+   * permission revocation. No-op (returns false) if permission is not granted;
+   * safe to call repeatedly (will not register duplicate watchers).
+   */
+  public async startWatching(
+    onUpdate?: (location: LocationData) => void,
+    options?: Location.LocationOptions
+  ): Promise<boolean> {
+    const hasPermission = await this.checkPermission();
+    if (!hasPermission) {
+      appLogger.infoSync('[LocationService] Cannot start watcher - permission not granted');
+      this.setStorePermission(false);
+      this.lastPermissionGranted = false;
+      return false;
+    }
+
+    // Prevent duplicate watchers.
+    if (this.watchSubscription) {
+      appLogger.infoSync('[LocationService] Watcher already active - skipping duplicate registration');
+      return true;
+    }
+
+    this.watchSubscription = await Location.watchPositionAsync(
+      options ?? {
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: 5000,
+        distanceInterval: 0,
+      },
+      location => {
+        const locationData: LocationData = {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          accuracy: location.coords.accuracy || undefined,
+          source: LocationSourceType.GPS,
+          obtainedAt: new Date().toISOString(),
+        };
+
+        this.cachedLocation = locationData;
+        useLocationStore.getState().setCoordinates({
+          latitude: locationData.latitude as number,
+          longitude: locationData.longitude as number,
+          accuracy: locationData.accuracy,
+          obtainedAt: locationData.obtainedAt,
+        });
+
+        onUpdate?.(locationData);
+      }
+    );
+
+    this.lastPermissionGranted = true;
+    this.setStorePermission(true);
+    this.startPermissionMonitoring();
+
+    appLogger.infoSync('[LocationService] Position watcher started');
+    return true;
+  }
+
+  /**
+   * Stop the active position watcher (if any) and release its native subscription.
+   */
+  public stopWatching(): void {
+    if (this.watchSubscription) {
+      this.watchSubscription.remove();
+      this.watchSubscription = null;
+      appLogger.infoSync('[LocationService] Position watcher stopped');
+    }
+  }
+
+  /**
+   * Re-check OS location permission and react to a granted -> denied transition
+   * by tearing down the watcher and purging all cached/stored coordinates.
+   * Exposed publicly so it can be unit-tested and triggered on demand.
+   */
+  public async reconcilePermission(): Promise<void> {
+    let granted = false;
+    try {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      this.locationPermissionStatus = status;
+      granted = status === 'granted';
+    } catch (error) {
+      appLogger.errorSync('[LocationService] Error while re-checking permission', error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+
+    if (this.lastPermissionGranted && !granted) {
+      this.handlePermissionRevoked();
+    }
+
+    this.lastPermissionGranted = granted;
+  }
+
+  /**
+   * Dispose of the watcher and all listeners. Call on logout / teardown.
+   */
+  public cleanup(): void {
+    this.stopWatching();
+    this.stopPermissionMonitoring();
+    this.lastPermissionGranted = false;
+  }
+
+  /**
+   * Full reset: cleanup + clear cached and stored coordinates. Useful for tests
+   * and for a hard re-initialisation of the service.
+   */
+  public reset(): void {
+    this.cleanup();
+    this.clearCachedLocation();
+    const store = useLocationStore.getState();
+    store.clearLocation();
+    store.setPermissionGranted(false);
+  }
+
+  private startPermissionMonitoring(): void {
+    if (!this.appStateSubscription) {
+      this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
+    }
+    if (!this.permissionPollTimer) {
+      this.permissionPollTimer = setInterval(() => {
+        void this.reconcilePermission();
+      }, PERMISSION_POLL_INTERVAL_MS);
+    }
+  }
+
+  private stopPermissionMonitoring(): void {
+    if (this.appStateSubscription) {
+      this.appStateSubscription.remove();
+      this.appStateSubscription = null;
+    }
+    if (this.permissionPollTimer) {
+      clearInterval(this.permissionPollTimer);
+      this.permissionPollTimer = null;
+    }
+  }
+
+  private handleAppStateChange = (nextState: AppStateStatus): void => {
+    if (nextState === 'active') {
+      void this.reconcilePermission();
+    }
+  };
+
+  /**
+   * Tear down the watcher, purge cached + stored coordinates, flip permission
+   * state, notify degradation store, and record the event.
+   */
+  private handlePermissionRevoked(): void {
+    appLogger.warnSync('[LocationService] Location permission revoked at OS level - cleaning up');
+
+    this.stopWatching();
+    this.clearCachedLocation();
+
+    const locationStore = useLocationStore.getState();
+    locationStore.clearLocation();
+    locationStore.setPermissionGranted(false);
+
+    try {
+      // Use getState() (not the hook) because this runs outside React.
+      const degradationStore = useDegradationStore.getState();
+      degradationStore.setFeatureStatus(FeatureType.LOCATION, FeatureStatus.DEGRADED);
+      degradationStore.addNotification({
+        feature: FeatureType.LOCATION,
+        status: FeatureStatus.DEGRADED,
+        message: 'Location permission was turned off. You can manually enter your location instead.',
+      });
+    } catch (error) {
+      appLogger.errorSync('[LocationService] Failed to update degradation store after revoke', error instanceof Error ? error : new Error(String(error)));
+    }
+
+    // The watcher is gone; stop monitoring until watching restarts.
+    this.stopPermissionMonitoring();
+  }
+
+  private setStorePermission(granted: boolean): void {
+    useLocationStore.getState().setPermissionGranted(granted);
   }
 }
 

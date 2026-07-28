@@ -1,13 +1,11 @@
 import { Network } from 'expo-network';
 import { useState, useEffect, useCallback } from 'react';
 
-export type ConnectionType = 'wifi' | 'cellular' | 'none' | 'unknown';
+import { networkMonitor, type ConnectionType, type NetworkStatus } from '../services/networkMonitor';
+import { appLogger } from '../utils/logger';
+import logger from '../utils/logger';
 
-export interface NetworkStatus {
-  isConnected: boolean;
-  isInternetReachable: boolean;
-  type: ConnectionType;
-}
+export type { ConnectionType, NetworkStatus };
 
 export interface ConnectionQuality {
   quality: 'slow-3g' | 'fast-3g' | '4g' | '5g' | 'wifi' | 'unknown';
@@ -15,11 +13,7 @@ export interface ConnectionQuality {
 }
 
 export function useNetworkStatus() {
-  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>({
-    isConnected: false,
-    isInternetReachable: false,
-    type: 'unknown',
-  });
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>(networkMonitor.getStatus());
   const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality>({
     quality: 'unknown',
     isFast: false,
@@ -29,14 +23,10 @@ export function useNetworkStatus() {
   const fetchNetworkState = useCallback(async () => {
     setIsChecking(true);
     try {
+      const probeStatus = await networkMonitor.probe();
+      setNetworkStatus(probeStatus);
+
       const networkState = await Network.getNetworkStateAsync();
-      
-      // Update network status
-      setNetworkStatus({
-        isConnected: networkState.isConnected,
-        isInternetReachable: networkState.isInternetReachable ?? true, // Assume true if not provided
-        type: networkState.type,
-      });
 
       // Determine connection quality
       let quality: ConnectionQuality['quality'] = 'unknown';
@@ -61,7 +51,6 @@ export function useNetworkStatus() {
             quality = '4g';
             isFast = true;
           } else if (generation === '3g') {
-            // Consider 3G with signal strength >= 50 as fast-3G
             if (signalStrength >= 50) {
               quality = 'fast-3g';
               isFast = true;
@@ -70,25 +59,24 @@ export function useNetworkStatus() {
               isFast = false;
             }
           } else {
-            // 2g or unknown generation
             quality = 'slow-3g';
             isFast = false;
           }
         } catch (error) {
-          console.warn('Failed to get cellular state', error);
-          // Fallback to treating cellular as unknown quality
+          appLogger.warnSync('Failed to get cellular state', { error: String(error) });
+          logger.warnSync('Failed to get cellular state', { error });
           quality = 'unknown';
           isFast = false;
         }
       } else {
-        // unknown or none (but we already checked isConnected)
         quality = 'unknown';
         isFast = false;
       }
 
       setConnectionQuality({ quality, isFast });
     } catch (error) {
-      console.warn('Failed to get network state', error);
+      appLogger.warnSync('Failed to get network state', { error: String(error) });
+      logger.warnSync('Failed to get network state', { error });
       setNetworkStatus({
         isConnected: false,
         isInternetReachable: false,
@@ -104,14 +92,16 @@ export function useNetworkStatus() {
   }, []);
 
   useEffect(() => {
-    // Fetch initial state
-    fetchNetworkState();
+    void networkMonitor.init();
 
-    // Subscribe to network state changes
-    const subscription = Network.addNetworkStateListener(fetchNetworkState);
+    const unsubMonitor = networkMonitor.subscribe(setNetworkStatus);
 
-    // Cleanup
+    const subscription = Network.addNetworkStateListener(() => {
+      fetchNetworkState();
+    });
+
     return () => {
+      unsubMonitor();
       subscription.remove();
     };
   }, [fetchNetworkState]);

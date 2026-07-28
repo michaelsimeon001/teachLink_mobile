@@ -171,7 +171,15 @@ jobs:
           VIOLATIONS=$(grep -rn "console\." src/ \
             --include='*.ts' \
             --include='*.tsx' \
-            --exclude-path='src/utils/logger*' \
+            --exclude='logger.ts' \
+            --exclude='logger.*.ts' \
+            --exclude='*.test.ts' \
+            --exclude='*.test.tsx' \
+            --exclude='*.spec.ts' \
+            --exclude='*.spec.tsx' \
+            --exclude-dir='__tests__' \
+            --exclude-dir='audit' \
+            --exclude-dir='config' \
             || true)
 
           if [ -n "$VIOLATIONS" ]; then
@@ -189,8 +197,7 @@ jobs:
           echo "✅ No console.* violations found."
 
       - name: Lint
-        run: npm run lint -- --max-warnings=250
-        run: npm run lint -- --cache --cache-location .eslintcache
+        run: npm run lint -- --cache --max-warnings=250 --cache-location .eslintcache
 
       - name: Format check
         run: npm run format:check

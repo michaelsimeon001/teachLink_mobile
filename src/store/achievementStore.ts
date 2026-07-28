@@ -11,6 +11,7 @@ import { useReviewStore } from './reviewStore';
 import apiService from '../services/api';
 import { inAppReviewService, ReviewTrigger } from '../services/inAppReview';
 import { appLogger } from '../utils/logger';
+import { achievementHaptic } from '../utils/quizHaptics';
 
 const triggerAchievementReview = () => {
   const { incrementAchievementsUnlocked, getMetrics, recordReviewRequest } = useReviewStore.getState();
@@ -317,6 +318,8 @@ export const useAchievementStore = create<AchievementState>()(
           achievementProgress: snapshotAchievementProgress(updatedAchievements),
           unlockedCount: updatedAchievements.filter(a => !a.isLocked).length,
         });
+        // #835: success haptic when an achievement unlocks.
+        void achievementHaptic();
         setTimeout(triggerAchievementReview, 500);
 
         try {

@@ -92,6 +92,14 @@ function scrubSensitiveFields(obj: unknown): unknown {
   return result;
 }
 
+// Sentry is enabled when explicitly opted in via env var OR when running a
+// production build. Setting EXPO_PUBLIC_SENTRY_ENABLED=true in a dev/staging
+// build (e.g. EAS preview channel) lets QA capture exceptions without needing
+// a full production binary. Setting it to 'false' in production is ignored so
+// that release builds always report to Sentry.
+const isSentryEnabled =
+  process.env.EXPO_PUBLIC_SENTRY_ENABLED === 'true' || !isDev;
+
 export enum LogLevel {
   ERROR = 0,
   WARN = 1,
@@ -372,12 +380,17 @@ export async function initializeLogging(): Promise<void> {
   }
 
   try {
-    // Initialize Sentry
-    if (!isDev) {
+    // Initialize Sentry — controlled by isSentryEnabled, not isDev directly.
+    // isDev still governs log verbosity below.
+    if (isSentryEnabled) {
       await Sentry.init({
         dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+        // Route events through a backend tunnel when configured so the raw DSN
+        // isn't the only ingestion path exposed in the app bundle. Falls back
+        // to direct DSN delivery when the tunnel URL is unset.
+        tunnel: process.env.EXPO_PUBLIC_SENTRY_TUNNEL_URL || undefined,
         tracesSampleRate: 0.1,
-        environment: 'production',
+        environment: isDev ? 'staging' : 'production',
         // Capture 100% of sessions so replay / breadcrumb trails are always available
         replaysSessionSampleRate: 0.1,
         replaysOnErrorSampleRate: 1.0,

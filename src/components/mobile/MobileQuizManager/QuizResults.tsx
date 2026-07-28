@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { Quiz } from '../../../types/course';
 import PrimaryButton from '../../common/PrimaryButton';
@@ -19,6 +19,19 @@ interface QuizResultsProps {
 
 export default function QuizResults({ quiz, score, passed, onBack, onRetake }: QuizResultsProps) {
   const passingScore = quiz.passingScore || 70;
+
+  // #853: let the learner share their score via the native share sheet.
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `I scored ${score}% on the "${quiz.title}" quiz on TeachLink${
+          passed ? ' and passed! 🎉' : '.'
+        }`,
+      });
+    } catch {
+      // Sharing is best-effort; ignore dismissals/errors.
+    }
+  };
 
   return (
     <ScrollView
@@ -52,19 +65,24 @@ export default function QuizResults({ quiz, score, passed, onBack, onRetake }: Q
 
       {/* Action Buttons */}
       <View style={styles.buttonContainer}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>Back to Course</Text>
-        </TouchableOpacity>
-        {!passed && onRetake && (
+        {/* #853: retry is available regardless of pass/fail */}
+        {onRetake && (
           <View style={styles.retakeButtonContainer}>
             <PrimaryButton
               onPress={onRetake}
-              title="Retake Quiz"
+              title="Retry Quiz"
               variant="gradient"
               size="medium"
             />
           </View>
         )}
+        {/* #853: share the score via the native share sheet */}
+        <TouchableOpacity onPress={handleShare} style={styles.shareButton}>
+          <Text style={styles.shareButtonText}>Share Score</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+          <Text style={styles.backButtonText}>Back to Course</Text>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );
@@ -168,6 +186,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#111827',
+  },
+  shareButton: {
+    padding: 16,
+    backgroundColor: '#19c3e6',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  shareButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
   },
   retakeButtonContainer: {
     width: '100%',

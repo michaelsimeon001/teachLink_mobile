@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { isRecord } from './persistence';
 import { Quiz, QuizProgress } from '../types/course';
 import logger from '../utils/logger';
+import { quizAnswerHaptic } from '../utils/quizHaptics';
 
 const QUIZ_SESSION_KEY = '@teachlink_quiz_session';
 const QUIZ_PROGRESS_KEY = '@teachlink_quiz_progress';
@@ -177,6 +178,9 @@ export const useQuizStore = create<QuizState>((set, get) => ({
   },
 
   selectAnswer: (questionId: string, answer: string | number, isMultiSelect = false) => {
+    // #835: tactile confirmation on every answer selection.
+    void quizAnswerHaptic();
+
     const { session } = get();
     let updatedAnswer: string | number | (string | number)[];
 

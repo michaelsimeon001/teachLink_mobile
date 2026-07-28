@@ -38,6 +38,7 @@ const KEYS = {
   USER_DATA: 'teachlink_user_data',
   SESSION_EXPIRES_AT: 'teachlink_session_expires_at',
   BIOMETRIC_ENABLED: 'teachlink_biometric_enabled',
+  BIOMETRIC_ENROLLMENT_ID: 'teachlink_biometric_enrollment_id',
   REMEMBERED_EMAIL: 'teachlink_remembered_email',
   REMEMBER_ME: 'teachlink_remember_me',
   INSTALL_UUID: 'teachlink_install_uuid',
@@ -327,6 +328,166 @@ export async function isBiometricEnabled(): Promise<boolean> {
   const value = await getItem(KEYS.BIOMETRIC_ENABLED, false);
   return value === '1';
 }
+
+// ─── Biometric enrollment tracking ────────────────────────────────────────────
+//
+// When a user adds, removes, or re-enrolls their biometrics (e.g. a new
+// fingerprint), the OS may invalidate Keychain/Keystore items that were
+// protected by the previous biometric enrollment.  To detect this we store
+// a "biometric enrollment id" — a random UUID generated at the time the
+// user first enables biometric login.  On every subsequent biometric
+// attempt we compare the stored id with the current state; if they differ
+// (or the secure data is no longer accessible) we know the enrollment has
+// changed and the user must re-enroll.
+//
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Save the biometric enrollment identifier to secure storage.
+ *
+ * This id is generated once when the user enables biometric login and
+ * should be compared against the current enrollment state on every
+ * biometric login attempt.
+ *
+ * @param enrollmentId  A UUID that uniquely identifies the enrollment session.
+ */
+export async function saveBiometricEnrollmentId(enrollmentId: string): Promise<void> {
+  await setItem(KEYS.BIOMETRIC_ENROLLMENT_ID, enrollmentId, false);
+  logger.info('Biometric enrollment id saved to secure storage');
+}
+
+/**
+ * Retrieve the stored biometric enrollment identifier.
+ *
+ * @returns The enrollment id, or `null` if none has been stored.
+ */
+export async function getBiometricEnrollmentId(): Promise<string | null> {
+  return getItem(KEYS.BIOMETRIC_ENROLLMENT_ID, false);
+}
+
+/**
+ * Remove the stored biometric enrollment identifier.
+ *
+ * Called during re-enrollment or when biometric login is disabled.
+ */
+export async function clearBiometricEnrollmentId(): Promise<void> {
+  await removeItem(KEYS.BIOMETRIC_ENROLLMENT_ID);
+  logger.info('Biometric enrollment id cleared from secure storage');
+}
+
+// ─── AsyncStorage Security Guard ────────────────────────────────────────────────
+// SECURITY: AsyncStorage is UNENCRYPTED plaintext storage.
+// NEVER use AsyncStorage for: tokens, passwords, session data, PII, or any
+// sensitive user data. It is only acceptable for non-sensitive caches,
+// feature flags, and UI state that has no security implications.
+//
+// If you need to store sensitive data, use SecureStore (Keychain/Keystore).
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ─── Token Cache ──────────────────────────────────────────────────────────────
+// NOTE: TokenCache stores only NON-SENSITIVE cache metadata (timestamps,
+// search query text). The actual tokens live in SecureStore. This cache
+// exists to avoid repeated SecureStore reads on the UI thread.
+
+const TOKEN_CACHE_KEY = '@teachlink_token_cache';
+const DEFAULT_TTL_MS = 5 * 60 * 1_000; // 5 minutes
+
+interface CacheEntry {
+  value: string;
+  expiresAt: number;
+  createdAt: number;
+}
+
+class TokenCache {
+  private memory: Map<string, CacheEntry> = new Map();
+  private initialized = false;
+
+  private isExpired(entry: CacheEntry): boolean {
+    return Date.now() > entry.expiresAt;
+  }
+
+  private async persist(): Promise<void> {
+    try {
+      const obj: Record<string, CacheEntry> = {};
+      this.memory.forEach((entry, key) => {
+        if (!this.isExpired(entry)) {
+          obj[key] = entry;
+        }
+      });
+      await AsyncStorage.setItem(TOKEN_CACHE_KEY, JSON.stringify(obj));
+    } catch {
+      // Non-critical; cache will warm from SecureStore on next read
+    }
+  }
+
+  async init(): Promise<void> {
+    if (this.initialized) return;
+    try {
+      const raw = await AsyncStorage.getItem(TOKEN_CACHE_KEY);
+      if (raw) {
+        const parsed: Record<string, CacheEntry> = JSON.parse(raw);
+        for (const [key, entry] of Object.entries(parsed)) {
+          if (!this.isExpired(entry)) {
+            this.memory.set(key, entry);
+          }
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    this.initialized = true;
+  }
+
+  get(key: string): string | null {
+    const entry = this.memory.get(key);
+    if (!entry) return null;
+    if (this.isExpired(entry)) {
+      this.memory.delete(key);
+      this.persist();
+      return null;
+    }
+    return entry.value;
+  }
+
+  async set(key: string, value: string, ttlMs: number = DEFAULT_TTL_MS): Promise<void> {
+    const entry: CacheEntry = {
+      value,
+      expiresAt: Date.now() + ttlMs,
+      createdAt: Date.now(),
+    };
+    this.memory.set(key, entry);
+    await this.persist();
+  }
+
+  invalidate(key: string): void {
+    this.memory.delete(key);
+    this.persist();
+  }
+
+  async clear(): Promise<void> {
+    this.memory.clear();
+    try {
+      await AsyncStorage.removeItem(TOKEN_CACHE_KEY);
+    } catch {
+      // Ignore
+    }
+  }
+
+  get size(): number {
+    this.evictExpired();
+    return this.memory.size;
+  }
+
+  private evictExpired(): void {
+    for (const [key, entry] of this.memory) {
+      if (this.isExpired(entry)) {
+        this.memory.delete(key);
+      }
+    }
+  }
+}
+
+export const tokenCache = new TokenCache();
 
 // ─── Install UUID & biometric reinstall guard ─────────────────────────────────
 
