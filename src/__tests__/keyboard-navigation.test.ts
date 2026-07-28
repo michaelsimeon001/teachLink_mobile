@@ -8,10 +8,10 @@
  * - useFocusRestore: focus restoration on close
  */
 
-import { renderHook, act } from '@testing-library/react-hooks';
+import { act, renderHook } from '@testing-library/react-native';
 import { Platform } from 'react-native';
 
-import { useKeyboardNavigation, useInteractiveKeyProps } from '../hooks/useKeyboardNavigation';
+import { useInteractiveKeyProps, useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 
 // Force web platform for keyboard tests
 const originalOS = Platform.OS;

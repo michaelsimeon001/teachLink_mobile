@@ -16,9 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install Maestro
-        run: curl -Ls "https://get.maestro.mobile.dev" | bash
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          export PATH="$HOME/.maestro/bin:$PATH"
+          maestro --version
       - name: Run E2E tests
-        run: maestro cloud --api-key ${{ secrets.MAESTRO_API_KEY }} --app-file ./app.apk maestro/
+        if: ${{ secrets.MAESTRO_API_KEY != '' }}
+        run: |
+          export PATH="$HOME/.maestro/bin:$PATH"
+          maestro cloud --api-key ${{ secrets.MAESTRO_API_KEY }} --app-file ./app.apk maestro/
   ci:
     runs-on: ubuntu-latest
 
@@ -42,6 +48,8 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
 
       - name: Cache Python dependencies
         uses: actions/cache@v4
@@ -52,7 +60,7 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install subsetting dependencies
-        run: pip install fonttools
+        run: pip install -r requirements.txt
 
       # ==============================
       # 📦 NODE.JS SETUP WITH CACHING
@@ -189,8 +197,7 @@ jobs:
           echo "✅ No console.* violations found."
 
       - name: Lint
-        run: npm run lint -- --max-warnings=250
-        run: npm run lint -- --cache --cache-location .eslintcache
+        run: npm run lint -- --max-warnings=250 --cache --cache-location .eslintcache
 
       - name: Format check
         run: npm run format:check

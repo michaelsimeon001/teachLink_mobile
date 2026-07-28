@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@jest/globals";
 import PerformanceSearchDashboard from "../PerformanceSearchDashboard";
 import { ISplitTransactionRecord } from "../../../types/search";
 
