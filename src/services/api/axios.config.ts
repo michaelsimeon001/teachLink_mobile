@@ -18,6 +18,18 @@ import { MUTATION_INVALIDATION_MAP } from '../../config/apiCacheConfig';
 import { SSL_PINNING } from '../../config/security';
 import { useAppStore } from '../../store';
 import { useConflictStore, type ConflictData } from '../../store/conflictStore';
+import { appLogger } from '../../utils/logger';
+import { notifyEntry, startTiming } from '../../utils/performanceTiming';
+import { healthMetricsService } from '../healthMetrics';
+import { getAccessToken, getRefreshToken, saveTokens } from '../secureStorage';
+import { sentryContextService } from '../sentryContext';
+import {
+  invalidateByPattern,
+  invalidateCacheForBatchRequests,
+  invalidateCacheForMutation,
+} from './cache';
+import { buildSanitizedApiError } from './errorSanitization';
+import { requestQueue } from './requestQueue';
 
 /**
  * #806: Runtime shape validator for 409 conflict response bodies.
@@ -37,18 +49,6 @@ function isConflictResponseShape(data: unknown): data is {
 } {
   return data !== null && data !== undefined && typeof data === 'object';
 }
-import { appLogger } from '../../utils/logger';
-import { notifyEntry, startTiming } from '../../utils/performanceTiming';
-import { healthMetricsService } from '../healthMetrics';
-import { getAccessToken, getRefreshToken, saveTokens } from '../secureStorage';
-import { sentryContextService } from '../sentryContext';
-import {
-  invalidateByPattern,
-  invalidateCacheForBatchRequests,
-  invalidateCacheForMutation,
-} from './cache';
-import { buildSanitizedApiError } from './errorSanitization';
-import { requestQueue } from './requestQueue';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -201,10 +201,17 @@ export const UPLOAD_TIMEOUT_MS = 30_000;
 
 let isRefreshing = false;
 
+const MAX_QUEUE_SIZE = 50;
+
 let refreshQueue: {
   resolve: (token: string) => void;
   reject: (err: unknown) => void;
 }[] = [];
+
+export function clearRefreshQueue(error?: Error) {
+  const err = error || new Error('Session cleared during token refresh.');
+  processRefreshQueue(null, err);
+}
 
 function processRefreshQueue(token: string | null, error: unknown) {
   refreshQueue.forEach(({ resolve, reject }) => (token ? resolve(token) : reject(error)));
@@ -425,6 +432,9 @@ apiClient.interceptors.response.use(
 
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
+          if (refreshQueue.length >= MAX_QUEUE_SIZE) {
+            return reject(new Error('Token refresh queue is full.'));
+          }
           refreshQueue.push({
             resolve: (token: string) => {
               originalRequest.headers.Authorization = `Bearer ${token}`;

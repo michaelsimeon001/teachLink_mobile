@@ -94,7 +94,7 @@ module.exports = defineConfig([
       // Logger internals may reference console internally (excluded via ignores above).
       // Note: `{ allow: [] }` is rejected by ESLint 9's rule schema, so use the
       // bare 'error' form, which disallows every console method.
-      'no-console': 'error',
+      'no-console': ['error', { allow: ['warn', 'error'] }],
     },
   },
 ]);

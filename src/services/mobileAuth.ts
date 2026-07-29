@@ -1,9 +1,9 @@
 
+import { useNotificationStore } from '../store/notificationStore';
 import logger from '../utils/logger';
 import apiClient from './api/axios.config';
-import * as secureStorage from './secureStorage';
 import { unregisterTokenFromBackend } from './pushNotifications';
-import { useNotificationStore } from '../store/notificationStore';
+import * as secureStorage from './secureStorage';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -429,24 +429,24 @@ class MobileAuthService {
 
   async logout(): Promise<void> {
     try {
-      // Unregister push token from backend before clearing session.
-      // This runs unconditionally (including session-expiry logouts) so the
-      // user stops receiving notifications immediately after sign-out.
       const pushToken = useNotificationStore.getState().pushToken;
       if (pushToken) {
         await unregisterTokenFromBackend(pushToken);
-        // Clear token from local store after successful (or failed) unregistration
         useNotificationStore.getState().setPushToken(null);
       }
 
-      // Notify backend of the logout session termination
       const accessToken = await secureStorage.getAccessToken();
       if (accessToken) {
-        await apiClient
-          .post(ENDPOINTS.LOGOUT)
-          .catch(() => {
-            // Ignore network errors during logout
-          });
+        try {
+          await apiClient.post(ENDPOINTS.LOGOUT);
+        } catch (error: any) {
+          if (error.isAxiosError && !error.response) {
+            requestQueue.addToQueue({
+              method: 'POST',
+              url: ENDPOINTS.LOGOUT,
+            } as any, 'critical');
+          }
+        }
       }
     } finally {
       await this._clearSession();
