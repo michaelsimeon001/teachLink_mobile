@@ -107,26 +107,51 @@ export function getSecureStoragePlatformInfo(): {
 // ─── Generic helpers ──────────────────────────────────────────────────────────
 
 /**
+ * Create a tamper-evident audit log for secure storage access.
+ * Logs every read/write operation with a timestamp, key name (never the value),
+ * and a call-site tag. This log is sent to Sentry as a breadcrumb to
+ * help detect unauthorized access or token theft.
+ *
+ * @param action - The action performed (e.g., 'read', 'write', 'delete').
+ * @param key - The key being accessed (the value is NEVER logged).
+ * @param tag - A unique identifier for the call-site (e.g., 'session-refresh').
+ */
+function auditLog(action: 'read' | 'write' | 'delete', key: string, tag: string): void {
+  const breadcrumb = {
+    category: 'audit.secure_storage',
+    message: `[${action.toUpperCase()}] key: ${key}`,
+    level: 'info',
+    data: {
+      key,
+      action,
+      tag,
+      platform: Platform.OS,
+      timestamp: new Date().toISOString(),
+    },
+  };
+
+  crashReportingService.addBreadcrumb(breadcrumb);
+  logger.info(`AUDIT: ${action} on ${key} from ${tag}`);
+}
+
+/**
  * Set item in encrypted secure storage
  * Throws error on failure - no silent fallback
  */
-async function setItem(key: string, value: string, isSensitive: boolean = true): Promise<void> {
+async function setItem(
+  key: string,
+  value: string,
+  isSensitive: boolean = true,
+  tag: string = 'unknown'
+): Promise<void> {
   try {
-    // Log sensitivity level (never log the actual value)
-    if (isSensitive) {
-      logger.info(`Setting sensitive data in Keychain/Keystore: ${key}`);
-    }
-
+    auditLog('write', key, tag);
     await SecureStore.setItemAsync(key, value, SECURE_OPTIONS);
-
-    if (isSensitive) {
-      logger.info(
-        `✅ Sensitive data stored securely: ${key} (${Platform.OS}/${Platform.OS === 'ios' ? 'Keychain' : 'Keystore'})`
-      );
-    }
   } catch (error) {
-    const errorMsg = `❌ CRITICAL: SecureStorage.set failed for key "${key}": ${error instanceof Error ? error.message : String(error)}`;
-    logger.error(errorMsg, { key, platform: Platform.OS });
+    const errorMsg = `❌ CRITICAL: SecureStorage.set failed for key "${key}": ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    logger.error(errorMsg, { key, platform: Platform.OS, tag });
     throw error;
   }
 }
@@ -135,20 +160,21 @@ async function setItem(key: string, value: string, isSensitive: boolean = true):
  * Get item from encrypted secure storage
  * Throws error on failure - no silent fallback for sensitive data
  */
-async function getItem(key: string, isSensitive: boolean = true): Promise<string | null> {
+async function getItem(
+  key: string,
+  isSensitive: boolean = true,
+  tag: string = 'unknown'
+): Promise<string | null> {
   try {
+    auditLog('read', key, tag);
     const value = await SecureStore.getItemAsync(key, SECURE_OPTIONS);
-
-    if (!value && isSensitive) {
-      logger.warn(`Sensitive data not found in secure storage: ${key}`);
-    }
-
     return value;
   } catch (error) {
-    const errorMsg = `❌ CRITICAL: SecureStorage.get failed for key "${key}": ${error instanceof Error ? error.message : String(error)}`;
-    logger.error(errorMsg, { key, platform: Platform.OS });
+    const errorMsg = `❌ CRITICAL: SecureStorage.get failed for key "${key}": ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    logger.error(errorMsg, { key, platform: Platform.OS, tag });
 
-    // For sensitive data, throw error instead of returning null
     if (isSensitive) {
       throw error;
     }
@@ -160,12 +186,12 @@ async function getItem(key: string, isSensitive: boolean = true): Promise<string
 /**
  * Remove item from encrypted secure storage
  */
-async function removeItem(key: string): Promise<void> {
+async function removeItem(key: string, tag: string = 'unknown'): Promise<void> {
   try {
+    auditLog('delete', key, tag);
     await SecureStore.deleteItemAsync(key, SECURE_OPTIONS);
-    logger.info(`Removed item from secure storage: ${key}`);
   } catch (error) {
-    logger.error(`SecureStorage.remove failed for key "${key}":`, error);
+    logger.error(`SecureStorage.remove failed for key "${key}" from ${tag}:`, error);
     throw error;
   }
 }
@@ -226,9 +252,9 @@ export async function saveTokens(
   }
 
   await Promise.all([
-    setItem(KEYS.ACCESS_TOKEN, accessToken, true),
-    setItem(KEYS.REFRESH_TOKEN, refreshToken, true),
-    setItem(KEYS.SESSION_EXPIRES_AT, String(expiresAt), false),
+    setItem(KEYS.ACCESS_TOKEN, accessToken, true, 'saveTokens'),
+    setItem(KEYS.REFRESH_TOKEN, refreshToken, true, 'saveTokens'),
+    setItem(KEYS.SESSION_EXPIRES_AT, String(expiresAt), false, 'saveTokens'),
   ]);
 
   logger.info('✅ Tokens saved securely to Keychain/Keystore', {
@@ -242,7 +268,7 @@ export async function saveTokens(
  * Throws error if retrieval fails (sensitive data)
  */
 export async function getAccessToken(): Promise<string | null> {
-  return getItem(KEYS.ACCESS_TOKEN, true);
+  return getItem(KEYS.ACCESS_TOKEN, true, 'getAccessToken');
 }
 
 /**
@@ -250,14 +276,14 @@ export async function getAccessToken(): Promise<string | null> {
  * Throws error if retrieval fails (sensitive data)
  */
 export async function getRefreshToken(): Promise<string | null> {
-  return getItem(KEYS.REFRESH_TOKEN, true);
+  return getItem(KEYS.REFRESH_TOKEN, true, 'getRefreshToken');
 }
 
 /**
  * Get session expiration timestamp from secure storage
  */
 export async function getSessionExpiresAt(): Promise<number | null> {
-  const raw = await getItem(KEYS.SESSION_EXPIRES_AT, false);
+  const raw = await getItem(KEYS.SESSION_EXPIRES_AT, false, 'getSessionExpiresAt');
   return raw ? Number(raw) : null;
 }
 
@@ -266,9 +292,9 @@ export async function getSessionExpiresAt(): Promise<number | null> {
  */
 export async function clearTokens(): Promise<void> {
   await Promise.all([
-    removeItem(KEYS.ACCESS_TOKEN),
-    removeItem(KEYS.REFRESH_TOKEN),
-    removeItem(KEYS.SESSION_EXPIRES_AT),
+    removeItem(KEYS.ACCESS_TOKEN, 'clearTokens'),
+    removeItem(KEYS.REFRESH_TOKEN, 'clearTokens'),
+    removeItem(KEYS.SESSION_EXPIRES_AT, 'clearTokens'),
   ]);
 
   logger.info('✅ All authentication tokens cleared from Keychain/Keystore');
@@ -285,7 +311,7 @@ export async function saveUserData(user: Record<string, unknown>): Promise<void>
     throw new Error('SecureStorage not initialized - cannot save user data');
   }
 
-  await setItem(KEYS.USER_DATA, JSON.stringify(user), true);
+  await setItem(KEYS.USER_DATA, JSON.stringify(user), true, 'saveUserData');
   logger.info('✅ User data saved securely to Keychain/Keystore');
 }
 
@@ -293,7 +319,7 @@ export async function saveUserData(user: Record<string, unknown>): Promise<void>
  * Get user profile data from encrypted storage
  */
 export async function getUserData<T = Record<string, unknown>>(): Promise<T | null> {
-  const raw = await getItem(KEYS.USER_DATA, true);
+  const raw = await getItem(KEYS.USER_DATA, true, 'getUserData');
   if (!raw) return null;
   try {
     return JSON.parse(raw) as T;
@@ -307,7 +333,7 @@ export async function getUserData<T = Record<string, unknown>>(): Promise<T | nu
  * Clear user profile data from encrypted storage
  */
 export async function clearUserData(): Promise<void> {
-  await removeItem(KEYS.USER_DATA);
+  await removeItem(KEYS.USER_DATA, 'clearUserData');
   logger.info('✅ User data cleared from Keychain/Keystore');
 }
 
@@ -317,7 +343,7 @@ export async function clearUserData(): Promise<void> {
  * Save biometric authentication preference to secure storage
  */
 export async function setBiometricEnabled(enabled: boolean): Promise<void> {
-  await setItem(KEYS.BIOMETRIC_ENABLED, enabled ? '1' : '0', false);
+  await setItem(KEYS.BIOMETRIC_ENABLED, enabled ? '1' : '0', false, 'setBiometricEnabled');
   logger.info(`Biometric setting updated: ${enabled ? 'enabled' : 'disabled'}`);
 }
 
@@ -325,7 +351,7 @@ export async function setBiometricEnabled(enabled: boolean): Promise<void> {
  * Check if biometric authentication is enabled
  */
 export async function isBiometricEnabled(): Promise<boolean> {
-  const value = await getItem(KEYS.BIOMETRIC_ENABLED, false);
+  const value = await getItem(KEYS.BIOMETRIC_ENABLED, false, 'isBiometricEnabled');
   return value === '1';
 }
 
@@ -352,7 +378,7 @@ export async function isBiometricEnabled(): Promise<boolean> {
  * @param enrollmentId  A UUID that uniquely identifies the enrollment session.
  */
 export async function saveBiometricEnrollmentId(enrollmentId: string): Promise<void> {
-  await setItem(KEYS.BIOMETRIC_ENROLLMENT_ID, enrollmentId, false);
+  await setItem(KEYS.BIOMETRIC_ENROLLMENT_ID, enrollmentId, false, 'saveBiometricEnrollmentId');
   logger.info('Biometric enrollment id saved to secure storage');
 }
 
@@ -362,7 +388,7 @@ export async function saveBiometricEnrollmentId(enrollmentId: string): Promise<v
  * @returns The enrollment id, or `null` if none has been stored.
  */
 export async function getBiometricEnrollmentId(): Promise<string | null> {
-  return getItem(KEYS.BIOMETRIC_ENROLLMENT_ID, false);
+  return getItem(KEYS.BIOMETRIC_ENROLLMENT_ID, false, 'getBiometricEnrollmentId');
 }
 
 /**
@@ -371,7 +397,7 @@ export async function getBiometricEnrollmentId(): Promise<string | null> {
  * Called during re-enrollment or when biometric login is disabled.
  */
 export async function clearBiometricEnrollmentId(): Promise<void> {
-  await removeItem(KEYS.BIOMETRIC_ENROLLMENT_ID);
+  await removeItem(KEYS.BIOMETRIC_ENROLLMENT_ID, 'clearBiometricEnrollmentId');
   logger.info('Biometric enrollment id cleared from secure storage');
 }
 
@@ -530,7 +556,7 @@ export async function verifyBiometricOnReinstall(): Promise<void> {
  * Save remembered email to secure storage
  */
 export async function saveRememberedEmail(email: string): Promise<void> {
-  await setItem(KEYS.REMEMBERED_EMAIL, email, false);
+  await setItem(KEYS.REMEMBERED_EMAIL, email, false, 'saveRememberedEmail');
   logger.info('Email address remembered in secure storage');
 }
 
@@ -538,14 +564,14 @@ export async function saveRememberedEmail(email: string): Promise<void> {
  * Get remembered email from secure storage
  */
 export async function getRememberedEmail(): Promise<string | null> {
-  return getItem(KEYS.REMEMBERED_EMAIL, false);
+  return getItem(KEYS.REMEMBERED_EMAIL, false, 'getRememberedEmail');
 }
 
 /**
  * Save remember-me preference to secure storage
  */
 export async function setRememberMe(enabled: boolean): Promise<void> {
-  await setItem(KEYS.REMEMBER_ME, enabled ? '1' : '0', false);
+  await setItem(KEYS.REMEMBER_ME, enabled ? '1' : '0', false, 'setRememberMe');
   logger.info(`Remember me setting updated: ${enabled ? 'enabled' : 'disabled'}`);
 }
 
@@ -553,7 +579,7 @@ export async function setRememberMe(enabled: boolean): Promise<void> {
  * Check if remember-me is enabled
  */
 export async function isRememberMeEnabled(): Promise<boolean> {
-  const value = await getItem(KEYS.REMEMBER_ME, false);
+  const value = await getItem(KEYS.REMEMBER_ME, false, 'isRememberMeEnabled');
   return value === '1';
 }
 
@@ -565,7 +591,9 @@ export async function isRememberMeEnabled(): Promise<boolean> {
  */
 export async function clearAllAuthData(): Promise<void> {
   try {
-    await Promise.all(Object.values(KEYS).map(removeItem));
+    await Promise.all(
+      Object.values(KEYS).map(key => removeItem(key, 'clearAllAuthData'))
+    );
     logger.info('✅ All secure data cleared from Keychain/Keystore');
   } catch (error) {
     logger.error('Error clearing all auth data from secure storage:', error);

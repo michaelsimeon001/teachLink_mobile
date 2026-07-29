@@ -166,9 +166,17 @@ class MobileAuthService {
       throw new Error('No refresh token available. Please log in again.');
     }
 
-    const { data } = await apiClient.post<AuthResult>(ENDPOINTS.REFRESH, {
-      refreshToken,
-    });
+    const { data } = await apiClient.post<AuthResult>(
+      ENDPOINTS.REFRESH,
+      {},
+      {
+        headers: {
+          // The refresh token is sent in the Authorization header for security,
+          // preventing it from being logged in server-side request bodies.
+          Authorization: `Bearer ${refreshToken}`,
+        },
+      }
+    );
 
     await this._persistSession(data, false);
     return data;
