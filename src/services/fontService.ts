@@ -1,10 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Asset } from 'expo-asset';
 import * as Font from 'expo-font';
-import { Platform } from 'react-native';
 
-import { appLogger } from '../utils/logger';
-import logger from '../utils/logger';
+import logger, { appLogger } from '../utils/logger';
 
 // Font metadata interface
 export interface FontMetadata {
@@ -171,7 +169,7 @@ class FontService {
     } catch (error) {
       appLogger.errorSync(`Failed to load font ${name}:`, error instanceof Error ? error : new Error(String(error)));
       logger.errorSync(`Failed to load font ${name}:`, error as Error);
-      return false;
+      throw error;
     }
   }
 
