@@ -47,7 +47,6 @@ import {
   removeNotificationListener,
   setupForegroundBadgeSync,
 } from './src/services/pushNotifications';
-import { requestQueue } from './src/services/requestQueue';
 import { searchIndexService } from './src/services/searchIndex';
 import { checkSessionValidity, initializeSecureStorage } from './src/services/secureStorage';
 import socketService from './src/services/socket';
@@ -480,9 +479,6 @@ if ((Object.values(FeatureType) as string[]).includes(feature)) {
 
       // Store the badge-sync teardown so we can call it on unmount.
       notificationCleanupRef.current = setupForegroundBadgeSync();
-
-      // Request queue monitoring
-      requestQueue.startMonitoring(apiClient);
 
       // Background sync service
       syncService.startAutoSync();
