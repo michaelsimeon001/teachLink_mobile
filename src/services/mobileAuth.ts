@@ -1,9 +1,9 @@
 
+import { useNotificationStore } from '../store/notificationStore';
 import logger from '../utils/logger';
 import apiClient from './api/axios.config';
-import * as secureStorage from './secureStorage';
 import { unregisterTokenFromBackend } from './pushNotifications';
-import { useNotificationStore } from '../store/notificationStore';
+import * as secureStorage from './secureStorage';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -166,9 +166,17 @@ class MobileAuthService {
       throw new Error('No refresh token available. Please log in again.');
     }
 
-    const { data } = await apiClient.post<AuthResult>(ENDPOINTS.REFRESH, {
-      refreshToken,
-    });
+    const { data } = await apiClient.post<AuthResult>(
+      ENDPOINTS.REFRESH,
+      {},
+      {
+        headers: {
+          // The refresh token is sent in the Authorization header for security,
+          // preventing it from being logged in server-side request bodies.
+          Authorization: `Bearer ${refreshToken}`,
+        },
+      }
+    );
 
     await this._persistSession(data, false);
     return data;
