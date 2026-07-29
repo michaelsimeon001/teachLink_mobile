@@ -1,6 +1,6 @@
 import { useAppStore } from '../store';
-import mobileAuthService from './mobileAuth';
 import logger from '../utils/logger';
+import mobileAuthService from './mobileAuth';
 
 export type { AuthResult, AuthTokens, AuthUser, LoginCredentials } from './mobileAuth';
 
@@ -85,10 +85,12 @@ export async function logout(): Promise<void> {
   try {
     await mobileAuthService.logout();
     store.logout();
+    clearRefreshQueue();
     logger.info('AuthService: logout successful');
   } catch (error) {
     // Still reset local state even if the API call fails
     store.logout();
+    clearRefreshQueue();
     logger.warn('AuthService: logout encountered an error, session cleared locally', error);
   } finally {
     store.setAuthLoading(false);
