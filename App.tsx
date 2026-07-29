@@ -602,6 +602,13 @@ if ((Object.values(FeatureType) as string[]).includes(feature)) {
           onUpdate={handleOtaUpdate}
           onDismiss={isCriticalUpdate ? undefined : () => setShowUpdateModal(false)}
         />
+        <SessionExpiredModal
+          visible={sessionExpired}
+          onClose={() => {
+            setSessionExpired(false);
+            useAppStore.getState().logout();
+          }}
+        />
       </AuthProvider>
     </ErrorBoundary>
   );
