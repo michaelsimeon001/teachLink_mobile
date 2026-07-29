@@ -11,6 +11,7 @@
  */
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import * as Crypto from 'expo-crypto';
 
 import { getEnv } from '../../config';
 import { MUTATION_INVALIDATION_MAP } from '../../config/apiCacheConfig';
@@ -214,7 +215,7 @@ function processRefreshQueue(token: string | null, error: unknown) {
 
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig & { _requestStartMs?: number }) => {
-    const requestId = uuidv4();
+    const requestId = Crypto.randomUUID();
     config.headers['X-Request-ID'] = requestId;
     pushLogContext({ requestId });
 
