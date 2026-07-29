@@ -26,19 +26,18 @@ import { initializeLogging } from './src/config/logging';
 import { AuthProvider, useAdaptiveTheme, useReviewMetrics } from './src/hooks';
 import AppNavigator from './src/navigation/AppNavigator';
 import {
-  apiClient,
   getCacheStatus,
   getRevalidatingCacheKeys,
-  subscribeToCacheStatus,
+  subscribeToCacheStatus
 } from './src/services/api';
 import { warmCriticalCaches } from './src/services/cacheWarming';
+import { crashReportingService } from './src/services/crashReporting';
+import { featureCapabilities } from './src/services/featureCapabilities';
 import {
   CRITICAL_FONTS,
   fontService,
   SECONDARY_FONTS,
 } from './src/services/fontService';
-import { crashReportingService } from './src/services/crashReporting';
-import { featureCapabilities } from './src/services/featureCapabilities';
 import { inAppReviewService } from './src/services/inAppReview';
 import { mobileAuthService } from './src/services/mobileAuth';
 import {
@@ -213,14 +212,17 @@ const App = () => {
         // 1. Load critical fonts and preload critical image assets in parallel
         //    so both complete before the splash screen hides, eliminating any
         //    image-placeholder flicker on first-time screen visits (#819).
+        const allFonts = [...CRITICAL_FONTS, ...SECONDARY_FONTS];
         const fontStart = Date.now();
-        await Promise.all([
-          fontService.loadFonts(CRITICAL_FONTS),
-          Asset.loadAsync(CRITICAL_ASSETS),
-        ]);
-        appLogger.infoSync(`[App] Critical fonts & assets loaded in ${Date.now() - fontStart}ms`);
-        await fontService.loadFonts(CRITICAL_FONTS);
-        appLogger.infoSync(`[App] Critical fonts loaded in ${Date.now() - fontStart}ms`);
+        try {
+          await Promise.all([
+            fontService.loadFonts(allFonts),
+            Asset.loadAsync(CRITICAL_ASSETS),
+          ]);
+        } catch (e: any) {
+          crashReportingService.reportError(e, 'font-loading-error');
+        }
+        appLogger.infoSync(`[App] All fonts & assets loaded in ${Date.now() - fontStart}ms`);
 
         // 2. Version-based cache invalidation: clear stale caches on app/data version bump
         const appVersion = require('./package.json').version as string;
@@ -239,15 +241,7 @@ const App = () => {
     prepareApp();
   }, []);
 
-  useEffect(() => {
-    if (!appIsReady) return;
 
-    InteractionManager.runAfterInteractions(async () => {
-      const start = Date.now();
-      await fontService.loadFonts(SECONDARY_FONTS);
-      appLogger.infoSync(`[App] Secondary fonts loaded in ${Date.now() - start}ms`);
-    });
-  }, [appIsReady]);
 
   // OTA Update check on foreground
   const checkForOtaUpdate = useCallback(async () => {
