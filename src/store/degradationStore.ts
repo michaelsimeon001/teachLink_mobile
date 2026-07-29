@@ -24,9 +24,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+import { FeatureStatus, FeatureType } from '../services/featureCapabilities';
 import { useFeatureFlagStore } from './featureFlagStore';
 import { asyncStorageJSONStorage, createHydrationErrorRecovery } from './persistence';
-import { FeatureStatus, FeatureType } from '../services/featureCapabilities';
 
 export interface DegradationNotification {
   id: string;
@@ -102,6 +102,23 @@ const createInitialDegradationState = () => ({
   preferences: DEFAULT_PREFERENCES,
 });
 
+const createSafeNoOpState = (): DegradationState => ({
+  ...createInitialDegradationState(),
+  setFeatureStatus: () => {},
+  isFeatureDegraded: () => true, // Assume degraded if not authenticated
+  getDegradedFeatures: () => Object.values(FeatureType),
+  addNotification: () => '',
+  dismissNotification: () => {},
+  clearNotifications: () => {},
+  getUnreadNotifications: () => [],
+  setShowDegradationBanners: () => {},
+  setAutoDismissAlerts: () => {},
+  setRemindPermissionRetry: () => {},
+  setRespectRemoteFlags: () => {},
+  disableFeature: () => {},
+  enableFeature: () => {},
+});
+
 let resetDegradationStoreAfterHydrationError = () => {};
 
 /**
@@ -151,6 +168,9 @@ export const useDegradationStore = create<DegradationState>()(
           }),
 
         isFeatureDegraded: (feature: FeatureType): boolean => {
+          const { isAuthenticated } = useAppStore.getState();
+          if (!isAuthenticated) return true; // Secure by default
+
           const status = get().featureStatuses[feature];
           const hardwareDegraded =
             status === FeatureStatus.PERMISSION_DENIED ||
@@ -171,6 +191,9 @@ export const useDegradationStore = create<DegradationState>()(
         },
 
         getDegradedFeatures: (): FeatureType[] => {
+          const { isAuthenticated } = useAppStore.getState();
+          if (!isAuthenticated) return Object.values(FeatureType); // Secure by default
+
           const features: FeatureType[] = [];
           for (const feature of Object.values(FeatureType)) {
             if (get().isFeatureDegraded(feature as FeatureType)) {
@@ -278,26 +301,38 @@ export const useDegradationStore = create<DegradationState>()(
         'degradation-store',
         resetDegradationStoreAfterHydrationError
       ),
-      /**
-       * Version 2: bumped from 1 (implicit) to discard any previously-persisted
-       * state where `degradedFeatures` was serialised as `{}` (empty object)
-       * due to JSON.stringify(Set) producing `{}`.
-       */
-      version: 2,
-      migrate: (_persistedState, _fromVersion) => {
-        // Any state written by version 1 (or earlier) had a corrupt
-        // `degradedFeatures: {}`.  Return undefined so Zustand falls back to
-        // the initial state defined above.
-        return undefined;
+      version: 3,
+      migrate: (persistedState, fromVersion) => {
+        if (fromVersion < 3) {
+          // Versions before 3 may have included derived state.
+          // We can safely discard it and let it be re-computed.
+          const { isFeatureDegraded, getDegradedFeatures, ...rest } =
+            persistedState as DegradationState & {
+              isFeatureDegraded?: any;
+              getDegradedFeatures?: any;
+            };
+          return rest;
+        }
+        return persistedState;
       },
       partialize: state => ({
         preferences: state.preferences,
         notifications: state.notifications,
         featureStatuses: state.featureStatuses,
-        // Include degradedFeatures so it survives app restarts.
-        // Safe to persist now that it is a plain array, not a Set.
         degradedFeatures: state.degradedFeatures,
       }),
     }
   )
 );
+
+// Selector that returns a no-op, secure-by-default state if the user is not authenticated.
+export const useGuardedDegradationStore = () => {
+  const isAuthenticated = useAppStore(state => state.isAuthenticated);
+  const store = useDegradationStore();
+
+  if (!isAuthenticated) {
+    return createSafeNoOpState();
+  }
+
+  return store;
+};

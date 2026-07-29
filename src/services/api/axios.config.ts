@@ -379,30 +379,41 @@ apiClient.interceptors.response.use(
       (error.code === 'ERR_NETWORK' || error.message === 'Network Error') &&
       isCertPinFailure(error)
     ) {
+      const requestUrl = originalRequest?.url ?? '';
+      const authApiDomain = new URL(baseURL).hostname;
+      const requestDomain = requestUrl ? new URL(requestUrl, baseURL).hostname : '';
       // Report to Sentry — endpoint and method only; no token, headers, or body
       sentryContextService.captureException(new Error('SSL certificate pin validation failed'), {
         tags: { 'security.event': 'ssl_pin_failure' },
         extra: {
           endpoint: originalRequest?.url,
           method: originalRequest?.method?.toUpperCase(),
+          isAuthDomain: requestDomain === authApiDomain,
         },
-        fingerprint: ['ssl-pin-failure'],
+        fingerprint: ['ssl-pin-failure', requestDomain],
       });
 
       appLogger.errorSync('SSL pin validation failed — possible MITM attack', undefined, {
         endpoint: originalRequest?.url,
         method: originalRequest?.method,
+        isAuthDomain: requestDomain === authApiDomain,
       });
 
-      // Force full logout — session may be compromised
-      useAppStore.getState().logout();
+      if (requestDomain === authApiDomain) {
+        // Force full logout — session may be compromised
+        useAppStore.getState().logout();
 
-      return Promise.reject({
-        message:
-          'Secure connection could not be established. Please check your network and try again.',
-        code: 'SSL_PIN_FAILURE',
-        status: 0,
-      });
+        return Promise.reject({
+          message: 'A security error occurred. Please log in again.',
+          code: 'SSL_PIN_FAILURE',
+        });
+      } else {
+        // For non-auth domains, cancel the request and show a security warning
+        return Promise.reject({
+          message: 'A security error occurred with a third-party service. Please try again later.',
+          code: 'SSL_PIN_FAILURE_NON_AUTH',
+        });
+      }
     }
 
     // ── Queue network errors for retry ───────────────────────────────────
@@ -506,13 +517,10 @@ apiClient.interceptors.response.use(
       const rawData = error.response?.data;
       const responseData = isConflictResponseShape(rawData) ? rawData : undefined;
       if (rawData !== undefined && !isConflictResponseShape(rawData)) {
-        sentryContextService.captureException(
-          new Error('409 response body has unexpected shape'),
-          {
-            extra: { rawData: String(rawData).slice(0, 200) },
-            tags: { 'api.error': 'conflict_shape_mismatch' },
-          }
-        );
+        sentryContextService.captureException(new Error('409 response body has unexpected shape'), {
+          extra: { rawData: String(rawData).slice(0, 200) },
+          tags: { 'api.error': 'conflict_shape_mismatch' },
+        });
       }
 
       // Extract version metadata from request headers
