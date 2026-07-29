@@ -104,8 +104,8 @@
         "./plugins/withSSLPinning",
         {
           "domain": "api.teachlink.com",
-          "primaryPin": "REPLACE_WITH_PRIMARY_SPKI_SHA256_BASE64==",
-          "backupPin": "REPLACE_WITH_BACKUP_SPKI_SHA256_BASE64=="
+          "primaryPin": "ro9iqKFUc1QlFywktB2QYqziDuEeV8NSFiHZhy75qi4=",
+          "backupPin": "C5+lpZ7tcV/weqBHvLr2K8k2y2cnq6/s3tT4G/cM9dY="
         }
       ],
       [
