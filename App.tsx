@@ -4,13 +4,13 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
-  AppState,
-  AppStateStatus,
-  InteractionManager,
-  LogBox,
-  Text,
-  View,
+    Alert,
+    AppState,
+    AppStateStatus,
+    InteractionManager,
+    LogBox,
+    Text,
+    View,
 } from 'react-native';
 
 import { Asset } from 'expo-asset';
@@ -26,19 +26,25 @@ import { initializeLogging } from './src/config/logging';
 import { AuthProvider, useAdaptiveTheme, useReviewMetrics } from './src/hooks';
 import AppNavigator from './src/navigation/AppNavigator';
 import {
-  getCacheStatus,
-  getRevalidatingCacheKeys,
-  subscribeToCacheStatus,
+    getCacheStatus,
+    getRevalidatingCacheKeys,
+    subscribeToCacheStatus
 } from './src/services/api';
 import { warmCriticalCaches } from './src/services/cacheWarming';
-import { crashReportingService } from './src/services/crashReportiimport { CRITICAL_FONTS, fontService, SECONDARY_FONTS } from './src/services/fontService';
+import { crashReportingService } from './src/services/crashReporting';
+import { featureCapabilities } from './src/services/featureCapabilities';
+import {
+    CRITICAL_FONTS,
+    fontService,
+    SECONDARY_FONTS,
+} from './src/services/fontService';
 import { inAppReviewService } from './src/services/inAppReview';
 import { mobileAuthService } from './src/services/mobileAuth';
 import {
-  registerForPushNotifications, // Added missing native push helpers
-  registerTokenWithBackend,
-  removeNotificationListener,
-  setupForegroundBadgeSync,
+    registerForPushNotifications, // Added missing native push helpers
+    registerTokenWithBackend,
+    removeNotificationListener,
+    setupForegroundBadgeSync,
 } from './src/services/pushNotifications';
 import { searchIndexService } from './src/services/searchIndex';
 import { checkSessionValidity, initializeSecureStorage } from './src/services/secureStorage';
@@ -47,8 +53,8 @@ import { syncService } from './src/services/syncService'; // Fixed naming conven
 import { useAppStore, useDeviceStore, useNotificationStore } from './src/store'; // Added missing store imports
 import { waitForHydration } from './src/store/createStore';
 import {
-  consumeHydrationResetToast,
-  subscribeToHydrationResetToast,
+    consumeHydrationResetToast,
+    subscribeToHydrationResetToast,
 } from './src/store/persistence';
 import { handleCacheVersionUpdate } from './src/utils/cacheVersioning';
 import { requireEnvVariables } from './src/utils/env';
@@ -161,13 +167,16 @@ function showCompromisedAlert(): void {
   );
 }
 
+
 const App = () => {
+  const [sessionExpired, setSessionExpired] = useState(false);
   const theme = useAppStore(state => state.theme);
   useAdaptiveTheme();
   // Using imported hook from the merge logic if needed downstream
   useReviewMetrics();
 
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [appIsReady, setAppIsReady] = React.useState(false);
   const [showPreferencesResetToast, setShowPreferencesResetToast] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -249,29 +258,7 @@ const App = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (!appIsReady) return;
 
-    // #848: track previous state locally so this listener detects foreground
-    // transitions on its own, rather than depending on another effect to keep
-    // a shared ref current. The subscription is removed on cleanup below.
-    let previousState = AppState.currentState;
-    const appStateSubscription = AppState.addEventListener('change', nextAppState => {
-      const wasInBackground = previousState.match(/inactive|background/);
-      const isForegrounded = nextAppState === 'active';
-      if (wasInBackground && isForegrounded) {
-        void checkForOtaUpdate();
-      }
-      previousState = nextAppState;
-    });
-
-    // Check once on first foreground after app ready
-    void checkForOtaUpdate();
-
-    return () => {
-      appStateSubscription.remove();
-    };
-  }, [appIsReady, checkForOtaUpdate]);
 
   const handleOtaUpdate = useCallback(async () => {
     try {
@@ -449,6 +436,10 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    // This effect consolidates all AppState 'change' listeners to prevent race
+    // conditions and duplicate calls when the app is rapidly backgrounded and
+    // foregrounded. A 200ms debounce is used to handle these events.
+
     const checkSessionOnForeground = async () => {
       // Don't read the store before it has rehydrated — destructured actions
       // would be undefined and calling them would throw / silently no-op.
@@ -464,8 +455,8 @@ const App = () => {
       const { valid, expiringSoon } = await checkSessionValidity();
 
       if (!valid) {
-        logout();
-        Alert.alert('Session expired', 'Your session has expired. Please log in again.');
+        // TODO: Persist any unsaved form data to AsyncStorage here.
+        setSessionExpired(true);
         return;
       }
 
@@ -494,29 +485,45 @@ const App = () => {
       await useDeviceStore.getState().runDeviceCompromisedCheck();
     };
 
-    // Wait for the persisted store to rehydrate before the first session check
-    // so we never read store actions before they exist.
-    void waitForHydration(useAppStore).then(() => {
-      void checkSessionOnForeground();
-    });
-    checkCompromisedOnForeground();
-
-    const appStateSubscription = AppState.addEventListener('change', nextAppState => {
-      const wasInBackground = appStateRef.current.match(/inactive|background/);
-      const isForegrounded = nextAppState === 'active';
-
-      if (wasInBackground && isForegrounded) {
-        void checkSessionOnForeground();
-        void checkCompromisedOnForeground();
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
       }
 
-      appStateRef.current = nextAppState;
-    });
+      debounceTimerRef.current = setTimeout(() => {
+        const wasInBackground = appStateRef.current.match(/inactive|background/);
+        const isForegrounded = nextAppState === 'active';
+
+        if (wasInBackground && isForegrounded) {
+          // All foreground actions are consolidated here
+          void checkForOtaUpdate();
+          void checkSessionOnForeground();
+          void checkCompromisedOnForeground();
+        }
+
+        appStateRef.current = nextAppState;
+      }, 200);
+    };
+
+    // Initial checks on app ready. The AppState listener will handle subsequent
+    // foregrounding events.
+    if (appIsReady) {
+      void checkForOtaUpdate();
+      void waitForHydration(useAppStore).then(() => {
+        void checkSessionOnForeground();
+      });
+      checkCompromisedOnForeground();
+    }
+
+    const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
 
     return () => {
       appStateSubscription.remove();
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
     };
-  }, []);
+  }, [appIsReady, checkForOtaUpdate]);
 
   if (!appIsReady) {
     return null;
@@ -539,6 +546,13 @@ const App = () => {
           version={updateVersion}
           onUpdate={handleOtaUpdate}
           onDismiss={isCriticalUpdate ? undefined : () => setShowUpdateModal(false)}
+        />
+        <SessionExpiredModal
+          visible={sessionExpired}
+          onClose={() => {
+            setSessionExpired(false);
+            useAppStore.getState().logout();
+          }}
         />
       </AuthProvider>
     </ErrorBoundary>
