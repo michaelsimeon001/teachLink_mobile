@@ -100,6 +100,45 @@ function scrubSensitiveFields(obj: unknown): unknown {
 const isSentryEnabled =
   process.env.EXPO_PUBLIC_SENTRY_ENABLED === 'true' || !isDev;
 
+const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
+const sentryDsnPattern = /^https:\/\/.+@sentry\.io\/\d+$/;
+
+if (isSentryEnabled) {
+  if (!sentryDsn || !sentryDsnPattern.test(sentryDsn)) {
+    console.warn(
+      'Sentry is enabled, but SENTRY_DSN is missing or invalid. Error reporting will be disabled.'
+    );
+  } else {
+    Sentry.init({
+      dsn: sentryDsn,
+      environment: isDev ? 'staging' : 'production',
+      integrations: [
+        new Sentry.ReactNativeTracing({
+          enableNativeFramesTracking: true,
+        }),
+      ],
+      tracesSampleRate: 1.0,
+      _experiments: {
+        profilesSampleRate: 1.0,
+      },
+      beforeBreadcrumb(breadcrumb) {
+        if (breadcrumb.data && typeof breadcrumb.data === 'object') {
+          breadcrumb.data = scrubSensitiveFields(breadcrumb.data) as Record<
+            string,
+            any
+          >;
+        }
+        return breadcrumb;
+      },
+    });
+
+    if (isDev) {
+      Sentry.captureMessage('Sentry initialized for debug build');
+    }
+    sentryContextService.listen();
+  }
+}
+
 export enum LogLevel {
   ERROR = 0,
   WARN = 1,

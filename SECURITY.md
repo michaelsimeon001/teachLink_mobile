@@ -1,37 +1,39 @@
 # Security
 
-## Sentry event tunnel
+This document outlines security procedures and best practices for the TeachLink mobile application.
 
-The Sentry DSN is a public constant in the JavaScript bundle. Anyone who
-reverse-engineers the APK/IPA can read it and flood the Sentry project with
-fake events, consuming quota.
+## SSL Pinning
 
-To avoid exposing the DSN as the only ingestion path, the app can send events
-through a backend **tunnel** instead of directly to Sentry.
+The TeachLink mobile app uses SSL pinning to ensure that it only communicates with trusted servers. This helps to prevent man-in-the-middle attacks.
 
-### App configuration
+### Certificate Pin Rotation
 
-Set the tunnel URL via environment variable:
+To maintain a high level of security, the SSL pins should be rotated periodically. The following steps outline the process for rotating the certificate pins:
 
-```
-EXPO_PUBLIC_SENTRY_TUNNEL_URL=https://api.teachlink.app/api/sentry-tunnel
-```
+1.  **Generate a new key and certificate signing request (CSR).**
 
-When set, `Sentry.init` (in `src/config/logging.ts`) routes all events through
-that endpoint. When unset, events fall back to direct DSN delivery.
+    ```bash
+    openssl req -new -newkey rsa:2048 -nodes -keyout new.key -out new.csr
+    ```
 
-### Backend tunnel endpoint
+2.  **Get the new certificate signed by the Certificate Authority (CA).**
 
-Implement `POST /api/sentry-tunnel` on the backend to:
+3.  **Extract the SPKI hash from the new certificate.**
 
-1. Accept the Sentry envelope body from the app.
-2. Forward it to the real Sentry ingest URL derived from the (server-held) DSN.
-3. Apply rate limiting per IP/client so abuse can't exhaust project quota.
+    ```bash
+    openssl x509 -in new.crt -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64
+    ```
 
-This keeps the raw DSN on the server and lets the backend throttle abusive
-clients before events reach Sentry.
+4.  **Update `app.json` with the new pins.**
 
-## Reporting a vulnerability
+    *   The new pin will become the `primaryPin`.
+    *   The old `primaryPin` will become the `backupPin`.
 
-Please report security issues privately to the maintainers rather than opening
-a public issue.
+5.  **Deploy the new certificate to the server.**
+
+6.  **Deploy the updated app to the app stores.**
+
+### Current Pins
+
+*   **Primary Pin:** `ro9iqKFUc1QlFywktB2QYqziDuEeV8NSFiHZhy75qi4=`
+*   **Backup Pin:** `C5+lpZ7tcV/weqBHvLr2K8k2y2cnq6/s3tT4G/cM9dY=`

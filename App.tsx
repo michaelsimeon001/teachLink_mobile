@@ -165,7 +165,9 @@ function showCompromisedAlert(): void {
   );
 }
 
+
 const App = () => {
+  const [sessionExpired, setSessionExpired] = useState(false);
   const theme = useAppStore(state => state.theme);
   useAdaptiveTheme();
   // Using imported hook from the merge logic if needed downstream
@@ -508,8 +510,8 @@ if ((Object.values(FeatureType) as string[]).includes(feature)) {
       const { valid, expiringSoon } = await checkSessionValidity();
 
       if (!valid) {
-        logout();
-        Alert.alert('Session expired', 'Your session has expired. Please log in again.');
+        // TODO: Persist any unsaved form data to AsyncStorage here.
+        setSessionExpired(true);
         return;
       }
 
@@ -598,6 +600,13 @@ if ((Object.values(FeatureType) as string[]).includes(feature)) {
           version={updateVersion}
           onUpdate={handleOtaUpdate}
           onDismiss={isCriticalUpdate ? undefined : () => setShowUpdateModal(false)}
+        />
+        <SessionExpiredModal
+          visible={sessionExpired}
+          onClose={() => {
+            setSessionExpired(false);
+            useAppStore.getState().logout();
+          }}
         />
       </AuthProvider>
     </ErrorBoundary>
