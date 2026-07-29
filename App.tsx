@@ -83,9 +83,6 @@ if (__DEV__) {
 } else {
   // Strip all logs except errors in production for performance
   console.log = () => {};
-  console.info = () => {};
-  console.warn = () => {};
-  console.debug = () => {};
 }
 
 const CacheRevalidationBanner = () => {
