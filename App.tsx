@@ -52,7 +52,6 @@ import socketService from './src/services/socket';
 import { syncService } from './src/services/syncService'; // Fixed naming convention from the merge conflict
 import { useAppStore, useDeviceStore, useNotificationStore } from './src/store'; // Added missing store imports
 import { waitForHydration } from './src/store/createStore';
-import { useDegradationStore } from './src/store/degradationStore';
 import {
     consumeHydrationResetToast,
     subscribeToHydrationResetToast,
@@ -73,7 +72,10 @@ requireEnvVariables();
 // Initialize centralized logging on app start
 initializeLogging().catch(err => {
   if (__DEV__) {
-    appLogger.errorSync('[App] Failed to initialize logging:', err instanceof Error ? err : new Error(String(err)));
+    appLogger.errorSync(
+      '[App] Failed to initialize logging:',
+      err instanceof Error ? err : new Error(String(err))
+    );
   }
 });
 
@@ -215,10 +217,7 @@ const App = () => {
         const allFonts = [...CRITICAL_FONTS, ...SECONDARY_FONTS];
         const fontStart = Date.now();
         try {
-          await Promise.all([
-            fontService.loadFonts(allFonts),
-            Asset.loadAsync(CRITICAL_ASSETS),
-          ]);
+          await Promise.all([fontService.loadFonts(allFonts), Asset.loadAsync(CRITICAL_ASSETS)]);
         } catch (e: any) {
           crashReportingService.reportError(e, 'font-loading-error');
         }
@@ -240,8 +239,6 @@ const App = () => {
 
     prepareApp();
   }, []);
-
-
 
   // OTA Update check on foreground
   const checkForOtaUpdate = useCallback(async () => {
@@ -307,40 +304,22 @@ const App = () => {
     };
 
     // Register unhandled rejection listener
-    if (global.onunhandledrejection === undefined) {
-      // @ts-ignore - Setting global error handler
-      global.onunhandledrejection = unhandledRejectionHandler;
+    if (typeof global.onunhandledrejection !== 'undefined') {
+      global.onunhandledrejection = (event: PromiseRejectionEvent) => {
+        unhandledRejectionHandler(event.reason);
+      };
+    } else {
+      // Fallback for environments that do not support onunhandledrejection
+      const ErrorUtils = require('react-native/Libraries/ErrorUtils');
+      ErrorUtils.setGlobalHandler((error: Error, isFatal: boolean) => {
+        if (!isFatal && error.message.includes('Unhandled promise rejection')) {
+          unhandledRejectionHandler(error);
+        }
+      });
     }
 
     // Connect to socket when app starts
     socketService.connect();
-
-    // Initialize feature capability detection (non-blocking)
-    featureCapabilities
-      .checkAllCapabilities()
-      .then(capabilities => {
-        const degradationStore = useDegradationStore.getState();
-        appLogger.infoSync('[App] Feature capabilities checked', {
-          camera: capabilities.camera.status,
-          notifications: capabilities.pushNotifications.status,
-          location: capabilities.location.status,
-        });
-        // Update degradation store with current feature statuses
-        Object.entries(capabilities).forEach(([feature, info]) => {
-          if (feature !== 'checkedAt' && 'status' in info) {
-            // #807: isFeatureType narrows string key to FeatureType
-if ((Object.values(FeatureType) as string[]).includes(feature)) {
-              degradationStore.setFeatureStatus(feature as FeatureType, info.status);
-            }
-          }
-        });
-      })
-      .catch(error => {
-        appLogger.errorSync(
-          '[App] Error checking feature capabilities',
-          error instanceof Error ? error : new Error(String(error))
-        );
-      });
 
     // Push notifications are now initialized within InteractionManager.runAfterInteractions below
 
@@ -360,33 +339,6 @@ if ((Object.values(FeatureType) as string[]).includes(feature)) {
     InteractionManager.runAfterInteractions(() => {
       // Socket connection (network I/O)
       socketService.connect();
-
-      // Feature capability detection (permission checks, async)
-      featureCapabilities
-        .checkAllCapabilities()
-        .then(capabilities => {
-          // Issue #820: read directly from store rather than closing over component state.
-          const degradationStore = useDegradationStore.getState();
-          appLogger.infoSync('[App] Feature capabilities checked', {
-            camera: capabilities.camera.status,
-            notifications: capabilities.pushNotifications.status,
-            location: capabilities.location.status,
-          });
-          Object.entries(capabilities).forEach(([feature, info]) => {
-            if (feature !== 'checkedAt' && 'status' in info) {
-              // #807: isFeatureType narrows string key to FeatureType
-if ((Object.values(FeatureType) as string[]).includes(feature)) {
-              degradationStore.setFeatureStatus(feature as FeatureType, info.status);
-            }
-            }
-          });
-        })
-        .catch(error => {
-          appLogger.errorSync(
-            '[App] Error checking feature capabilities',
-            error instanceof Error ? error : new Error(String(error))
-          );
-        });
 
       // Push notification registration and explainer logic.
       // Issue #820: all state reads use store.getState() instead of closed-over
@@ -479,8 +431,7 @@ if ((Object.values(FeatureType) as string[]).includes(feature)) {
       if (notificationSubscriptionRef.current) {
         removeNotificationListener(notificationSubscriptionRef.current);
       }
-      // @ts-ignore
-      global.onunhandledrejection = undefined;
+      global.onunhandledrejection = null;
     };
   }, []);
 
@@ -496,14 +447,8 @@ if ((Object.values(FeatureType) as string[]).includes(feature)) {
         return;
       }
 
-      const {
-        isAuthenticated,
-        refreshToken,
-        setUser,
-        setTokens,
-        setSessionExpiringSoon,
-        logout,
-      } = useAppStore.getState();
+      const { isAuthenticated, refreshToken, setUser, setTokens, setSessionExpiringSoon, logout } =
+        useAppStore.getState();
 
       if (!isAuthenticated || !refreshToken) return;
 
@@ -588,6 +533,7 @@ if ((Object.values(FeatureType) as string[]).includes(feature)) {
     <ErrorBoundary>
       <AuthProvider>
         <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
+        <FeatureCapabilityHandler />
         <CacheRevalidationBanner />
         <ScreenErrorBoundary screenName="AppNavigator">
           <AppNavigator />

@@ -103,11 +103,14 @@ jest.mock('../src/store', () => ({
 }));
 
 jest.mock('../src/store/conflictStore', () => ({
-  useConflictStore: Object.assign(jest.fn(() => ({})), {
-    getState: jest.fn(() => ({
-      addConflict: jest.fn(),
-    })),
-  }),
+  useConflictStore: Object.assign(
+    jest.fn(() => ({})),
+    {
+      getState: jest.fn(() => ({
+        addConflict: jest.fn(),
+      })),
+    }
+  ),
 }));
 
 jest.mock('../src/services/api/errorSanitization', () => ({
@@ -128,7 +131,7 @@ function makeAxiosError(
   code?: string,
   message?: string,
   config?: Partial<InternalAxiosRequestConfig>,
-  response?: any,
+  response?: any
 ): AxiosError {
   const cfg = {
     url: '/test',
@@ -191,8 +194,24 @@ describe('Issue #838 — axios.config error handling branches', () => {
     }));
     jest.doMock('../src/utils/logger', () => ({
       __esModule: true,
-      default: { info: jest.fn(), infoSync: jest.fn(), warn: jest.fn(), warnSync: jest.fn(), error: jest.fn(), errorSync: jest.fn(), debug: jest.fn() },
-      appLogger: { info: jest.fn(), infoSync: jest.fn(), warn: jest.fn(), warnSync: jest.fn(), error: jest.fn(), errorSync: jest.fn(), debug: jest.fn() },
+      default: {
+        info: jest.fn(),
+        infoSync: jest.fn(),
+        warn: jest.fn(),
+        warnSync: jest.fn(),
+        error: jest.fn(),
+        errorSync: jest.fn(),
+        debug: jest.fn(),
+      },
+      appLogger: {
+        info: jest.fn(),
+        infoSync: jest.fn(),
+        warn: jest.fn(),
+        warnSync: jest.fn(),
+        error: jest.fn(),
+        errorSync: jest.fn(),
+        debug: jest.fn(),
+      },
     }));
     jest.doMock('../src/utils/performanceTiming', () => ({
       startTiming: jest.fn(() => jest.fn(() => ({ duration: 0, success: true }))),
@@ -230,9 +249,12 @@ describe('Issue #838 — axios.config error handling branches', () => {
       },
     }));
     jest.doMock('../src/store/conflictStore', () => ({
-      useConflictStore: Object.assign(jest.fn(() => ({})), {
-        getState: jest.fn(() => ({ addConflict: jest.fn() })),
-      }),
+      useConflictStore: Object.assign(
+        jest.fn(() => ({})),
+        {
+          getState: jest.fn(() => ({ addConflict: jest.fn() })),
+        }
+      ),
     }));
     jest.doMock('../src/services/api/errorSanitization', () => ({
       buildSanitizedApiError: jest.fn((status: number, code?: string) => ({
@@ -252,43 +274,102 @@ describe('Issue #838 — axios.config error handling branches', () => {
   });
 
   // ── 1. SSL pin failure → logout ────────────────────────────────────────────
-  it('1. detects SSL certificate pin failure and triggers logout', () => {
+  it('1. detects SSL certificate pin failure and triggers logout for auth domain', async () => {
     const mockLogout = jest.fn();
     const { useAppStore } = require('../src/store');
     useAppStore.getState.mockReturnValue({
       isAuthenticated: true,
       sessionExpiresAt: Date.now() + 3600_000,
       logout: mockLogout,
-      incrementAuthFailure: jest.fn(),
-      incrementRefreshFailure: jest.fn(),
     });
 
-    // Override SSL_PINNING bypass to false so the check runs
-    const { SSL_PINNING } = require('../src/config/security');
-    SSL_PINNING.bypassEnabled = false;
+    const { sentryContextService } = require('../src/services/sentryContext');
+    const { appLogger } = require('../src/utils/logger');
 
-    // Verify the SSL detection conditions are correct:
-    // 1. Error has code ERR_NETWORK
-    // 2. SSL_PINNING.bypassEnabled is false
-    // 3. Error cause contains SSL keywords
-    const error = makeAxiosError(undefined, 'ERR_NETWORK', 'Network Error', {
-      url: '/api/data',
-      method: 'get',
-      headers: {} as any,
-    }, { cause: 'javax.net.ssl.SSLHandshakeException' });
+    // Re-import with mocks
+    const axiosConfig = require('../src/services/api/axios.config');
+    const interceptor = apiClient.interceptors.response.handlers[1].rejected;
 
-    // Replicate the isCertPinFailure check from axios.config.ts
-    const msg = (error.message ?? '').toLowerCase();
-    const cause = String((error as unknown as { cause?: unknown }).cause ?? '').toLowerCase();
-    const isSSLError =
-      !SSL_PINNING.bypassEnabled &&
-      (msg.includes('ssl') || msg.includes('certificate') || msg.includes('tls') ||
-       cause.includes('sslhandshakeexception') || cause.includes('sslpeerunverifiedexception'));
+    const error = makeAxiosError(
+      undefined,
+      'ERR_NETWORK',
+      'Network Error',
+      { url: 'https://api.example.com/user' },
+      { cause: 'javax.net.ssl.SSLHandshakeException' }
+    );
 
-    expect(error.code).toBe('ERR_NETWORK');
-    expect(isSSLError).toBe(true);
-    expect(mockLogout).not.toHaveBeenCalled(); // Direct detection doesn't call logout
-    SSL_PINNING.bypassEnabled = true; // Reset
+    // Enable SSL pinning for this test
+    jest.doMock('../src/config/security', () => ({
+      SSL_PINNING: { bypassEnabled: false },
+    }));
+
+    await expect(interceptor(error)).rejects.toMatchObject({
+      code: 'SSL_PIN_FAILURE',
+      message: 'A security error occurred. Please log in again.',
+    });
+
+    expect(mockLogout).toHaveBeenCalledTimes(1);
+    expect(sentryContextService.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        tags: { 'security.event': 'ssl_pin_failure' },
+        extra: expect.objectContaining({ isAuthDomain: true }),
+        fingerprint: ['ssl-pin-failure', 'api.example.com'],
+      })
+    );
+    expect(appLogger.errorSync).toHaveBeenCalledWith(
+      'SSL pin validation failed — possible MITM attack',
+      undefined,
+      expect.objectContaining({ isAuthDomain: true })
+    );
+  });
+
+  it('1.1. detects SSL pin failure on non-auth domain and rejects without logout', async () => {
+    const mockLogout = jest.fn();
+    const { useAppStore } = require('../src/store');
+    useAppStore.getState.mockReturnValue({
+      isAuthenticated: true,
+      sessionExpiresAt: Date.now() + 3600_000,
+      logout: mockLogout,
+    });
+
+    const { sentryContextService } = require('../src/services/sentryContext');
+    const { appLogger } = require('../src/utils/logger');
+
+    const interceptor = apiClient.interceptors.response.handlers[1].rejected;
+
+    const error = makeAxiosError(
+      undefined,
+      'ERR_NETWORK',
+      'Network Error',
+      { url: 'https://cdn.some-other-domain.com/image.png' },
+      { cause: 'javax.net.ssl.SSLHandshakeException' }
+    );
+
+    // Enable SSL pinning for this test
+    jest.doMock('../src/config/security', () => ({
+      SSL_PINNING: { bypassEnabled: false },
+    }));
+
+    await expect(interceptor(error)).rejects.toMatchObject({
+      code: 'SSL_PIN_FAILURE_NON_AUTH',
+      message: 'A security error occurred with a third-party service. Please try again later.',
+    });
+
+    expect(mockLogout).not.toHaveBeenCalled();
+    expect(sentryContextService.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        tags: { 'security.event': 'ssl_pin_failure' },
+        extra: expect.objectContaining({ isAuthDomain: false }),
+        fingerprint: ['ssl-pin-failure', 'cdn.some-other-domain.com'],
+      })
+    );
+    expect(appLogger.errorSync).toHaveBeenCalledWith(
+      'SSL pin validation failed — possible MITM attack',
+      undefined,
+      expect.objectContaining({ isAuthDomain: false })
+    );
   });
 
   // ── 2. 401 first retry with token refresh ─────────────────────────────────
@@ -303,7 +384,11 @@ describe('Issue #838 — axios.config error handling branches', () => {
       incrementRefreshFailure: jest.fn(),
     });
 
-    const { saveTokens, getRefreshToken, getAccessToken } = require('../src/services/secureStorage');
+    const {
+      saveTokens,
+      getRefreshToken,
+      getAccessToken,
+    } = require('../src/services/secureStorage');
 
     // Mock adapter: first call returns 401, second (retry after refresh) returns 200
     let callCount = 0;
@@ -379,17 +464,23 @@ describe('Issue #838 — axios.config error handling branches', () => {
       message: 'Conflict detected',
     };
 
-    const error = makeAxiosError(409, undefined, 'Conflict', {
-      url: '/api/notes/123',
-      method: 'put',
-      headers: {
-        'X-Last-Known-Version': '3',
-        'X-Client-Timestamp': '1234567890',
-        'X-Entity-Type': 'note',
-        'X-Entity-Id': 'note-123',
-      } as any,
-      data: { name: 'Local Version' },
-    }, { data: conflictData });
+    const error = makeAxiosError(
+      409,
+      undefined,
+      'Conflict',
+      {
+        url: '/api/notes/123',
+        method: 'put',
+        headers: {
+          'X-Last-Known-Version': '3',
+          'X-Client-Timestamp': '1234567890',
+          'X-Entity-Type': 'note',
+          'X-Entity-Id': 'note-123',
+        } as any,
+        data: { name: 'Local Version' },
+      },
+      { data: conflictData }
+    );
 
     const responseData = error.response?.data as any;
     expect(responseData?.serverVersionNumber).toBe(5);
@@ -406,7 +497,8 @@ describe('Issue #838 — axios.config error handling branches', () => {
     for (let i = 0; i < RATE_LIMIT_DELAYS.length; i++) {
       retryCount++;
       const delayIndex = retryCount - 1;
-      const delayTime = RATE_LIMIT_DELAYS[delayIndex] || RATE_LIMIT_DELAYS[RATE_LIMIT_DELAYS.length - 1];
+      const delayTime =
+        RATE_LIMIT_DELAYS[delayIndex] || RATE_LIMIT_DELAYS[RATE_LIMIT_DELAYS.length - 1];
       delays.push(delayTime);
     }
 
@@ -456,8 +548,7 @@ describe('Issue #838 — axios.config error handling branches', () => {
     });
 
     const isUpload =
-      error.config?.method?.toUpperCase() === 'POST' &&
-      error.config?.data instanceof FormData;
+      error.config?.method?.toUpperCase() === 'POST' && error.config?.data instanceof FormData;
 
     const message = isUpload
       ? 'Upload timed out. Please check your connection and try again.'
