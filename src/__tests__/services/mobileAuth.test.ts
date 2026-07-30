@@ -56,7 +56,9 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import apiClient from '../../services/api/axios.config';
 import {
     BiometricReenrollmentError,
+    isValidBiometricType,
     mobileAuthService,
+    VALID_BIOMETRIC_TYPES,
 } from '../../services/mobileAuth';
 import * as secureStorage from '../../services/secureStorage';
 
@@ -586,5 +588,29 @@ describe('MobileAuthService — Biometric Re-enrollment Flow', () => {
       const result2 = await mobileAuthService.loginWithBiometrics();
       expect(result2).toEqual(MOCK_AUTH_RESULT);
     });
+  });
+
+  describe('isValidBiometricType', () => {
+    it.each(VALID_BIOMETRIC_TYPES)('should accept the valid biometric type "%s"', (type) => {
+      expect(isValidBiometricType(type)).toBe(true);
+    });
+
+    it.each([
+      'retina',
+      'voice',
+      'Fingerprint',
+      '',
+      ' ',
+      'fingerprint ',
+    ])('should reject the invalid string "%s"', (value) => {
+      expect(isValidBiometricType(value)).toBe(false);
+    });
+
+    it.each([null, undefined, 1, true, {}, [], Symbol('face')])(
+      'should reject the non-string value %p',
+      (value) => {
+        expect(isValidBiometricType(value)).toBe(false);
+      }
+    );
   });
 });
