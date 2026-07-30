@@ -40,6 +40,18 @@ export interface SocialProvider {
 
 export type BiometricType = 'fingerprint' | 'face' | 'iris' | 'none';
 
+export const VALID_BIOMETRIC_TYPES: readonly BiometricType[] = ['fingerprint', 'face', 'iris', 'none'];
+
+/**
+ * Runtime type guard for BiometricType. Needed because biometric type
+ * values can come from mockable/abstract native modules, so a value
+ * claiming to be a BiometricType at compile time is not guaranteed to
+ * actually be one at runtime (e.g. in a mocked test environment).
+ */
+export function isValidBiometricType(value: unknown): value is BiometricType {
+  return typeof value === 'string' && (VALID_BIOMETRIC_TYPES as readonly string[]).includes(value);
+}
+
 // ─── Biometric re-enrollment error ────────────────────────────────────────────
 
 /**
@@ -293,13 +305,18 @@ class MobileAuthService {
 
       // expo-local-authentication returns an array of SupportedAuthenticationTypes
       // enum values. We map the first supported type to our BiometricType.
-      if (types.includes(1)) {
+      const resolvedType: BiometricType = types.includes(1)
         // BIOMETRIC = 1 (fingerprint, face, etc.)
         // On iOS we can't distinguish face vs fingerprint from this enum,
         // so we default to 'fingerprint' and let the UI adapt.
-        return 'fingerprint';
+        ? 'fingerprint'
+        : 'none';
+
+      if (!isValidBiometricType(resolvedType)) {
+        throw new Error(`Invalid biometric type resolved: ${String(resolvedType)}`);
       }
-      return 'none';
+
+      return resolvedType;
     } catch {
       return 'none';
     }
