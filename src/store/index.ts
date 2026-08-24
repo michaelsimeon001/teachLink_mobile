@@ -47,6 +47,8 @@ interface AppState {
   resetAuthFailures: () => void;
   incrementRefreshFailure: () => void;
   resetRefreshFailures: () => void;
+  sessionExpiredModalVisible: boolean;
+  setSessionExpiredModalVisible: (visible: boolean) => void;
 }
 
 const INITIAL_APP_STATE = {
@@ -61,6 +63,7 @@ const INITIAL_APP_STATE = {
   theme: 'light' as const,
   isLoading: false,
   error: null,
+  sessionExpiredModalVisible: false,
 };
 
 let resetAppStoreAfterHydrationError = () => {};
@@ -169,6 +172,8 @@ export const useAppStore = create<AppState>()(
           },
           resetRefreshFailures: () =>
             set({ refreshFailureCount: 0 }, false, 'resetRefreshFailures'),
+          setSessionExpiredModalVisible: (sessionExpiredModalVisible: boolean) =>
+            set({ sessionExpiredModalVisible }, false, 'setSessionExpiredModalVisible'),
         };
       }),
       {
