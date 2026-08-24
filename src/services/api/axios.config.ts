@@ -503,6 +503,7 @@ apiClient.interceptors.response.use(
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
+        refreshStartTime = 0;
       }
     }
 
