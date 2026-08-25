@@ -7,6 +7,8 @@ const ENV_KEYS = [
   'EXPO_PUBLIC_ENABLE_PUSH_NOTIFICATIONS',
   'EXPO_PUBLIC_STORYBOOK',
   'EXPO_PUBLIC_SENTRY_ENABLED',
+  'EXPO_PUBLIC_SENTRY_DSN',
+  'EXPO_PUBLIC_LAZY_LOAD_DELAY_MS',
 ];
 
 const savedValues: Record<string, string | undefined> = {};
@@ -199,6 +201,19 @@ describe('validateEnvVariables', () => {
     const result = validateEnvVariables();
     expect(result.valid).toBe(false);
     expect(result.message).toContain('EXPO_PUBLIC_SENTRY_ENABLED');
+  });
+
+  it('returns invalid when Sentry is enabled without a DSN', () => {
+    setEnv({
+      EXPO_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      EXPO_PUBLIC_SOCKET_URL: 'wss://socket.example.com',
+      EXPO_PUBLIC_SENTRY_ENABLED: 'true',
+      EXPO_PUBLIC_SENTRY_DSN: undefined,
+    });
+
+    const result = validateEnvVariables();
+    expect(result.valid).toBe(false);
+    expect(result.message).toContain('EXPO_PUBLIC_SENTRY_DSN');
   });
 
   it('returns invalid for both missing required vars', () => {

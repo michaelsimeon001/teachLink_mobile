@@ -14,6 +14,8 @@ export interface EndpointTtl {
   ttl: number;
   /** Time (ms) before the entry is evicted (stale-while-revalidate window). */
   staleTtl: number;
+  /** Whether responses for this endpoint may be persisted to device storage. */
+  persistable: boolean;
 }
 
 const SECONDS = 1_000;
@@ -23,13 +25,14 @@ const MINUTES = 60 * SECONDS;
 export const DEFAULT_ENDPOINT_TTL: EndpointTtl = {
   ttl: 60 * SECONDS,
   staleTtl: 5 * MINUTES,
+  persistable: false,
 };
 
 /** Critical, fast-changing endpoints: 30 s, with no stale window. */
-const CRITICAL_TTL: EndpointTtl = { ttl: 30 * SECONDS, staleTtl: 30 * SECONDS };
+const CRITICAL_TTL = { ttl: 30 * SECONDS, staleTtl: 30 * SECONDS, persistable: false };
 
 /** Static, slow-changing endpoints: 5 min fresh, 10 min stale window. */
-const STATIC_TTL: EndpointTtl = { ttl: 5 * MINUTES, staleTtl: 10 * MINUTES };
+const STATIC_TTL = { ttl: 5 * MINUTES, staleTtl: 10 * MINUTES, persistable: true };
 
 /**
  * Maps a normalized endpoint path (prefix) to its TTL configuration.
@@ -82,6 +85,11 @@ export function resolveEndpointTtl(urlOrKey: string): EndpointTtl {
     .sort((a, b) => b.length - a.length)[0];
 
   return match ? ENDPOINT_TTL_MAP[match] : DEFAULT_ENDPOINT_TTL;
+}
+
+/** Resolve disk eligibility separately so cache callers can opt out per entry. */
+export function resolveEndpointPersistence(urlOrKey: string): boolean {
+  return resolveEndpointTtl(urlOrKey).persistable;
 }
 
 /**

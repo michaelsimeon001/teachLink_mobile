@@ -169,7 +169,7 @@ function showCompromisedAlert(): void {
 
 
 const App = () => {
-  const [sessionExpired, setSessionExpired] = useState(false);
+  const sessionExpired = useAppStore(state => state.sessionExpiredModalVisible);
   const theme = useAppStore(state => state.theme);
   useAdaptiveTheme();
   // Using imported hook from the merge logic if needed downstream
@@ -456,7 +456,7 @@ const App = () => {
 
       if (!valid) {
         // TODO: Persist any unsaved form data to AsyncStorage here.
-        setSessionExpired(true);
+        useAppStore.getState().setSessionExpiredModalVisible(true);
         return;
       }
 
@@ -550,7 +550,7 @@ const App = () => {
         <SessionExpiredModal
           visible={sessionExpired}
           onClose={() => {
-            setSessionExpired(false);
+            useAppStore.getState().setSessionExpiredModalVisible(false);
             useAppStore.getState().logout();
           }}
         />

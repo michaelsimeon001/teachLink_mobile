@@ -31,7 +31,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node scripts/monitorCIBuildTimes.js \
-            --workflow=ci-optimized \
+            --workflow=ci \
             --days=${{ github.event.inputs.days || '7' }} \
             --report
 
@@ -48,7 +48,7 @@ jobs:
         run: |
           # This will exit with error if performance targets not met
           node scripts/monitorCIBuildTimes.js \
-            --workflow=ci-optimized \
+            --workflow=ci \
             --days=7 \
             --json > metrics.json
           
