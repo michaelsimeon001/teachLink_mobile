@@ -99,6 +99,7 @@ jest.mock('../src/store', () => ({
       resetAuthFailures: jest.fn(),
       incrementRefreshFailure: jest.fn(),
       setSessionExpiredModalVisible: jest.fn(),
+      setAuthLockedUntil: jest.fn(),
     })),
   },
 }));
@@ -247,6 +248,7 @@ describe('Issue #838 — axios.config error handling branches', () => {
           resetAuthFailures: jest.fn(),
           incrementRefreshFailure: jest.fn(),
           setSessionExpiredModalVisible: jest.fn(),
+          setAuthLockedUntil: jest.fn(),
         })),
       },
     }));

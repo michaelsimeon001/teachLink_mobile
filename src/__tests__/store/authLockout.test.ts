@@ -132,4 +132,31 @@ describe('auth lockout', () => {
       expect(getStore().authLockedUntil).toBeNull();
     });
   });
+
+  // ── Server-driven lockout (Retry-After) ────────────────────────────────────
+
+  describe('setAuthLockedUntil', () => {
+    it('sets the lockout timestamp from a server Retry-After value', () => {
+      const lockUntil = Date.now() + 120_000;
+      getStore().setAuthLockedUntil(lockUntil);
+
+      expect(getStore().authLockedUntil).toBe(lockUntil);
+    });
+
+    it('clears the lockout when set to null', () => {
+      getStore().setAuthLockedUntil(Date.now() + 60_000);
+      expect(getStore().authLockedUntil).not.toBeNull();
+
+      getStore().setAuthLockedUntil(null);
+      expect(getStore().authLockedUntil).toBeNull();
+    });
+
+    it('overwrites an existing lockout with a later timestamp', () => {
+      getStore().setAuthLockedUntil(Date.now() + 10_000);
+      const laterLock = Date.now() + 300_000;
+      getStore().setAuthLockedUntil(laterLock);
+
+      expect(getStore().authLockedUntil).toBe(laterLock);
+    });
+  });
 });
