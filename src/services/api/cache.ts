@@ -31,6 +31,7 @@ interface CacheEntry<T> {
   sensitive: boolean;
   encrypted: boolean;
   sizeBytes: number; // calculated size of this entry
+  lastAccessedAt: number; // timestamp of last read or write for LRU eviction
 }
 
 interface PersistedCacheEnvelope<T> {
@@ -54,11 +55,16 @@ let storageHits = 0;
 let networkFetches = 0;
 let backgroundRevalidations = 0;
 let invalidations = 0;
+let evictions = 0;
 let operationsSinceAnalytics = 0;
 let lastAnalyticsAt = 0;
 
 const revalidatingKeys = new Set<string>();
 const cacheStatusListeners = new Set<() => void>();
+
+// In-memory index of persisted cache keys to their tags and dataType,
+// so invalidatePersistentWhere can evaluate predicates without reading bodies.
+const persistentKeyIndex = new Map<string, { tags: string[]; dataType: string }>();
 
 export interface CacheStatus {
   key: string;
@@ -125,6 +131,7 @@ export function getCacheStats() {
     networkFetches,
     backgroundRevalidations,
     invalidations,
+    evictions,
     networkReductionRate,
     sizeBytes: currentCacheSize,
     entryCount: store.size,
@@ -139,6 +146,7 @@ export function resetCacheStats(): void {
   networkFetches = 0;
   backgroundRevalidations = 0;
   invalidations = 0;
+  evictions = 0;
   operationsSinceAnalytics = 0;
   lastAnalyticsAt = 0;
 }
@@ -254,9 +262,31 @@ export function estimateSize(obj: any, visited = new Set<any>()): number {
 
 function evictToLimit(): void {
   while (currentCacheSize > maxCacheSizeBytes && store.size > 0) {
-    const oldestKey = store.keys().next().value;
+    // Find the least recently used non-critical entry
+    let oldestKey: string | undefined;
+    let oldestAccess = Infinity;
+
+    for (const [key, entry] of store) {
+      if (entry.critical) continue; // Skip critical entries
+      if (entry.lastAccessedAt < oldestAccess) {
+        oldestAccess = entry.lastAccessedAt;
+        oldestKey = key;
+      }
+    }
+
+    // If all remaining entries are critical, find the oldest critical one
+    if (oldestKey === undefined) {
+      for (const [key, entry] of store) {
+        if (entry.lastAccessedAt < oldestAccess) {
+          oldestAccess = entry.lastAccessedAt;
+          oldestKey = key;
+        }
+      }
+    }
+
     if (oldestKey !== undefined) {
       removeMemoryEntry(oldestKey);
+      evictions++;
     } else {
       break;
     }
@@ -284,6 +314,7 @@ function removeMemoryEntry(key: string): boolean {
 
 function putMemoryEntry<T>(key: string, entry: CacheEntry<T>): void {
   removeMemoryEntry(key);
+  entry.lastAccessedAt = Date.now();
   store.set(key, entry as CacheEntry<unknown>);
   currentCacheSize += entry.sizeBytes;
   evictToLimit();
@@ -301,7 +332,8 @@ function getMemoryEntry<T>(key: string): CacheEntry<T> | null {
     return null;
   }
 
-  // LRU behavior: move to the end of the Map
+  // LRU behavior: update lastAccessedAt and move to the end of the Map
+  entry.lastAccessedAt = Date.now();
   store.delete(key);
   store.set(key, entry as CacheEntry<unknown>);
 
@@ -377,6 +409,8 @@ async function persistCacheEntry<T>(key: string, entry: CacheEntry<T>): Promise<
     } else {
       await AsyncStorage.setItem(storageKey, serialized);
     }
+    // Update the in-memory index
+    persistentKeyIndex.set(key, { tags: entry.tags, dataType: entry.dataType });
   } catch {
     // Some response bodies may not be serializable. Keep the memory tier.
   }
@@ -428,6 +462,7 @@ async function readPersistentCache<T>(key: string): Promise<CacheEntry<T> | null
 async function removePersistentCache(key: string): Promise<void> {
   try {
     await AsyncStorage.removeItem(storageKeyFor(key));
+    persistentKeyIndex.delete(key);
   } catch {
     /* ignore storage cleanup errors */
   }
@@ -445,23 +480,50 @@ async function getPersistentCacheKeys(): Promise<string[]> {
 async function invalidatePersistentWhere(
   predicate: (key: string, entry: CacheEntry<unknown>) => boolean
 ): Promise<void> {
-  const keys = await getPersistentCacheKeys();
+  // Use the in-memory index to evaluate predicates without reading bodies
+  const keysToRemove: string[] = [];
 
-  await Promise.all(
-    keys.map(async storageKey => {
-      const encodedKey = storageKey.slice(CACHE_STORAGE_PREFIX.length);
-      const cacheKey = decodeURIComponent(encodedKey);
-      const entry = await readPersistentCache(cacheKey);
-      if (entry && predicate(cacheKey, entry as CacheEntry<unknown>)) {
-        await AsyncStorage.removeItem(storageKey);
-      }
-    })
-  );
+  for (const [key, indexEntry] of persistentKeyIndex) {
+    const mockEntry = {
+      data: null,
+      cachedAt: 0,
+      ttl: 0,
+      staleTtl: 0,
+      tags: indexEntry.tags,
+      dataType: indexEntry.dataType,
+      critical: false,
+      persist: true,
+      sensitive: false,
+      encrypted: false,
+      sizeBytes: 0,
+    } as CacheEntry<unknown>;
+
+    if (predicate(key, mockEntry)) {
+      keysToRemove.push(key);
+    }
+  }
+
+  if (keysToRemove.length === 0) return;
+
+  // Batch removal with AsyncStorage.multiRemove
+  const storageKeys = keysToRemove.map(key => storageKeyFor(key));
+  try {
+    await AsyncStorage.multiRemove(storageKeys);
+  } catch {
+    // Fallback to per-key removal
+    await Promise.all(keysToRemove.map(key => removePersistentCache(key)));
+  }
+
+  // Remove from in-memory index
+  for (const key of keysToRemove) {
+    persistentKeyIndex.delete(key);
+  }
 }
 
 export async function clearPersistentCache(): Promise<void> {
   const keys = await getPersistentCacheKeys();
   await Promise.all(keys.map(key => AsyncStorage.removeItem(key)));
+  persistentKeyIndex.clear();
 }
 
 export function getCache<T>(key: string): T | null {
@@ -506,6 +568,7 @@ export function setCache<T>(
     sensitive: options.sensitive,
     encrypted: options.encrypted,
     sizeBytes,
+    lastAccessedAt: Date.now(),
   };
 
   putMemoryEntry(key, entry);

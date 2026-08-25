@@ -58,12 +58,17 @@ class SocketService {
   private isBackgrounded = false;
   private appStateSubscription: ReturnType<typeof AppState.addEventListener> | null = null;
   private outgoingQueue: QueuedMessage[] = [];
+  private hasRestoredQueue = false;
 
   async connect() {
     if (this.socket?.connected) return this.socket;
+    if (this.socket?.connecting) return this.socket;
 
     this.mmkv = await this.storageReady;
-    this.restoreQueue();
+    if (!this.hasRestoredQueue) {
+      await this.restoreQueue();
+      this.hasRestoredQueue = true;
+    }
 
     if (!this.appStateSubscription) {
       this.appStateSubscription = AppState.addEventListener(
@@ -389,16 +394,24 @@ class SocketService {
 
       const stored: QueuedMessage[] = JSON.parse(raw);
       const now = Date.now();
-      this.outgoingQueue = stored
+      const validMessages = stored
         .filter(msg => now - msg.timestamp < QUEUE_TTL_MS)
         .sort((left, right) => left.timestamp - right.timestamp);
 
-      const expiredCount = stored.length - this.outgoingQueue.length;
+      const expiredCount = stored.length - validMessages.length;
       if (expiredCount > 0) {
         appLogger.info(`[Socket Queue] Discarded ${expiredCount} expired messages`);
       }
-      if (this.outgoingQueue.length > 0) {
-        appLogger.info(`[Socket Queue] Restored ${this.outgoingQueue.length} queued messages`);
+
+      // Dedupe by id when merging restored entries with existing queue
+      const existingIds = new Set(this.outgoingQueue.map(msg => msg.id));
+      const newMessages = validMessages.filter(msg => !existingIds.has(msg.id));
+      this.outgoingQueue = [...this.outgoingQueue, ...newMessages].sort(
+        (left, right) => left.timestamp - right.timestamp
+      );
+
+      if (newMessages.length > 0) {
+        appLogger.info(`[Socket Queue] Restored ${newMessages.length} new queued messages (${validMessages.length - newMessages.length} duplicates skipped)`);
       }
       if (this.outgoingQueue.length > MAX_QUEUE_LENGTH) {
         const evictedCount = this.outgoingQueue.length - MAX_QUEUE_LENGTH;

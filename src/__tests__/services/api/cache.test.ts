@@ -84,6 +84,53 @@ describe('LRU cache eviction and stats', () => {
     expect(getCache('k4')).toBe('val4');
   });
 
+  it('preserves frequently-read entries over rarely-read ones during eviction', () => {
+    setMaxCacheSize(500);
+
+    setCache('read-heavy', 'val1', 60_000, 300_000);
+    setCache('write-only', 'val2', 60_000, 300_000);
+
+    // Read the read-heavy entry many times to promote it
+    for (let i = 0; i < 5; i++) {
+      getCache('read-heavy');
+    }
+
+    // Add a new entry to trigger eviction
+    setCache('new-entry', 'val3', 60_000, 300_000);
+
+    // write-only should be evicted since read-heavy was accessed more recently
+    expect(getCache('read-heavy')).toBe('val1');
+    expect(getCache('write-only')).toBeNull();
+    expect(getCache('new-entry')).toBe('val3');
+  });
+
+  it('evicts non-critical entries before critical ones', () => {
+    setMaxCacheSize(500);
+
+    setCache('critical-entry', 'val1', 60_000, 300_000, { critical: true });
+    setCache('normal-entry', 'val2', 60_000, 300_000, { critical: false });
+
+    // Add entries to force eviction
+    setCache('extra1', 'val3', 60_000, 300_000);
+    setCache('extra2', 'val4', 60_000, 300_000);
+
+    // Critical entry should survive
+    expect(getCache('critical-entry')).toBe('val1');
+  });
+
+  it('tracks eviction stats', () => {
+    resetCacheStats();
+    setMaxCacheSize(500);
+
+    setCache('k1', 'val1', 60_000, 300_000);
+    setCache('k2', 'val2', 60_000, 300_000);
+    setCache('k3', 'val3', 60_000, 300_000);
+    setCache('k4', 'val4', 60_000, 300_000); // should trigger eviction
+
+    const stats = getCacheStats();
+    expect(stats.evictions).toBeGreaterThan(0);
+  });
+
   it('correctly tracks hits and misses stats', () => {
     resetCacheStats();
 
