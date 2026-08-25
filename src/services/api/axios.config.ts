@@ -110,6 +110,8 @@ function isCertPinFailure(error: AxiosError): boolean {
 const BASE_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 60_000;
 const MAX_SERVER_ERROR_RETRIES = 7;
+const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'PUT', 'DELETE']);
+const RETRY_DEADLINE_MS = 30_000; // Overall deadline for all retries
 
 function getBackoffWithJitter(attempt: number): number {
   const exponential = BASE_DELAY_MS * Math.pow(2, attempt);
@@ -254,6 +256,11 @@ apiClient.interceptors.request.use(
       return config;
     }
 
+    // Generate Idempotency-Key for POST requests to prevent duplicate writes on retry
+    if (config.method?.toUpperCase() === 'POST' && !config.headers?.['Idempotency-Key']) {
+      config.headers['Idempotency-Key'] = Crypto.randomUUID();
+    }
+
     // Hard-block any authenticated request when the session has already expired.
     // The foreground check in App.tsx handles proactive refresh; this is the
     // safety net for requests that slip through while the app is in use.
@@ -274,9 +281,11 @@ apiClient.interceptors.request.use(
     }
 
     // Attach timing finish function to config for use in response interceptor
-    (
-      config as InternalAxiosRequestConfig & { _timingFinish?: ReturnType<typeof startTiming> }
-    )._timingFinish = startTiming('api', config.url ?? 'unknown', config.method?.toUpperCase());
+    // Only call startTiming when _timingFinish is not already set to avoid
+    // leaking finalisers on retried requests.
+    if (!config._timingFinish) {
+      config._timingFinish = startTiming('api', config.url ?? 'unknown', config.method?.toUpperCase());
+    }
 
     return config;
   },
@@ -322,7 +331,10 @@ apiClient.interceptors.response.use(
     popLogContext();
 
     // Record successful API call for health metrics
-    const cfg = response.config as InternalAxiosRequestConfig & { _requestStartMs?: number };
+    const cfg = response.config as InternalAxiosRequestConfig & {
+      _requestStartMs?: number;
+      _timingFinish?: ReturnType<typeof startTiming>;
+    };
     const durationMs = cfg._requestStartMs ? Date.now() - cfg._requestStartMs : 0;
     healthMetricsService.recordApiCall({
       endpoint: cfg.url ?? 'unknown',
@@ -335,6 +347,14 @@ apiClient.interceptors.response.use(
     // (SWR cache hits are returned before the request is dispatched and never arrive
     // here). Increment the miss counter so the 60 s flush captures real network usage.
     recordCacheMiss();
+
+    // Record timing on success — exactly once per logical request
+    if (cfg._timingFinish) {
+      const entry = cfg._timingFinish(true, response.status);
+      entry.retryCount = cfg._retryCount ?? 0;
+      notifyEntry(entry);
+      cfg._timingFinish = undefined;
+    }
 
     // Successful login resets the client-side auth-failure counter.
     // This is a UX affordance only; the actual security boundary is server-side
@@ -351,7 +371,9 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
       _retryCount?: number;
+      _retryDeadlineAt?: number;
       _requestStartMs?: number;
+      _timingFinish?: ReturnType<typeof startTiming>;
     };
 
     // ── Record API error for health metrics ───────────────────────────────
@@ -441,7 +463,19 @@ apiClient.interceptors.response.use(
     // ── Queue network errors for retry ───────────────────────────────────
     if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
       if (originalRequest) {
-        await requestQueue.addToQueue(originalRequest);
+        const method = originalRequest.method?.toUpperCase();
+        const isIdempotent = method === undefined || IDEMPOTENT_METHODS.has(method);
+        const hasIdempotencyKey = Boolean(originalRequest.headers?.['Idempotency-Key']);
+
+        // Only queue idempotent methods or mutations with an idempotency key
+        if (isIdempotent || hasIdempotencyKey) {
+          await requestQueue.addToQueue(originalRequest);
+        } else {
+          appLogger.warnSync('Network error on non-idempotent request — not queueing to prevent duplicate writes', {
+            endpoint: originalRequest.url,
+            method: originalRequest.method,
+          });
+        }
       }
       return Promise.reject(error);
     }
@@ -682,8 +716,21 @@ apiClient.interceptors.response.use(
 
     if (status && status >= 500) {
       originalRequest._retryCount = originalRequest._retryCount || 0;
+      const method = originalRequest.method?.toUpperCase();
 
-      if (originalRequest._retryCount < MAX_SERVER_ERROR_RETRIES) {
+      // Only retry idempotent methods by default. Non-idempotent mutations (POST)
+      // require an Idempotency-Key header to be retried safely.
+      const isIdempotent = method === undefined || IDEMPOTENT_METHODS.has(method);
+      const hasIdempotencyKey = Boolean(originalRequest.headers?.['Idempotency-Key']);
+
+      // Initialize deadline on first failure
+      if (!originalRequest._retryDeadlineAt) {
+        originalRequest._retryDeadlineAt = Date.now();
+      }
+      const elapsedSinceFirstFailure = Date.now() - originalRequest._retryDeadlineAt;
+      const withinDeadline = elapsedSinceFirstFailure < RETRY_DEADLINE_MS;
+
+      if (originalRequest._retryCount < MAX_SERVER_ERROR_RETRIES && (isIdempotent || hasIdempotencyKey) && withinDeadline) {
         const attempt = originalRequest._retryCount;
         originalRequest._retryCount += 1;
 
@@ -696,6 +743,7 @@ apiClient.interceptors.response.use(
             method: originalRequest.method,
             attempt: originalRequest._retryCount,
             delayMs: delayTime,
+            elapsedMs: elapsedSinceFirstFailure,
           }
         );
 
@@ -711,6 +759,14 @@ apiClient.interceptors.response.use(
           method: originalRequest.method,
         }
       );
+
+      // Record timing on terminal failure
+      if (originalRequest._timingFinish) {
+        const entry = originalRequest._timingFinish(false, status);
+        entry.retryCount = originalRequest._retryCount ?? 0;
+        notifyEntry(entry);
+        originalRequest._timingFinish = undefined;
+      }
 
       return Promise.reject({
         message: 'Server error. Please try again later.',
