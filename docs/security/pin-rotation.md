@@ -1,3 +1,18 @@
+## Certificate asset audit
+
+The repository-root `isrgrootx2.der` artifact was audited on 2026-08-25 and
+removed. It was an HTML document rather than a DER certificate, and no source
+file, Metro asset configuration, native template, Expo config plugin, EAS
+profile, hook, or script referenced it. It was therefore not part of any build
+step or trust store.
+
+This project pins TLS public keys by SPKI SHA-256 hashes generated into the
+native configuration by `plugins/withSSLPinning.js`; it does not commit a CA
+certificate trust anchor. Certificate rotation ownership remains with the
+team responsible for `api.teachlink.com`; active hashes and their rotation
+dates must be maintained in `src/config/security.ts`, `app.json`, and this
+runbook.
+
 # SSL Certificate Pin Rotation Runbook
 
 Certificate pinning is enforced in production builds for `api.teachlink.com`.
@@ -7,12 +22,12 @@ This document describes how to rotate keys with zero downtime and no forced app 
 
 ## How pinning works in this project
 
-| Layer | Mechanism |
-|---|---|
-| iOS 14+ | `NSPinnedDomains` in `Info.plist` (SPKI SHA-256) |
-| Android 7+ | `res/xml/network_security_config.xml` `<pin-set>` |
-| JS detection | `isCertPinFailure()` in `src/services/api/axios.config.ts` |
-| Config source | `src/config/security.ts` + `app.json` plugin options |
+| Layer         | Mechanism                                                  |
+| ------------- | ---------------------------------------------------------- |
+| iOS 14+       | `NSPinnedDomains` in `Info.plist` (SPKI SHA-256)           |
+| Android 7+    | `res/xml/network_security_config.xml` `<pin-set>`          |
+| JS detection  | `isCertPinFailure()` in `src/services/api/axios.config.ts` |
+| Config source | `src/config/security.ts` + `app.json` plugin options       |
 
 The backup pin is the key — it must always be pre-generated and deployed **before** the primary cert expires. This is what guarantees zero downtime.
 
@@ -74,8 +89,8 @@ Update `src/config/security.ts`:
 ```typescript
 export const SSL_PINNING = {
   domain: 'api.teachlink.com',
-  primaryPin: '<CURRENT_CERT_SPKI_SHA256>',   // unchanged
-  backupPin:  '<NEXT_CERT_SPKI_SHA256>',       // ← update this
+  primaryPin: '<CURRENT_CERT_SPKI_SHA256>', // unchanged
+  backupPin: '<NEXT_CERT_SPKI_SHA256>', // ← update this
   bypassEnabled: process.env.EXPO_PUBLIC_APP_ENV !== 'production',
 } as const;
 ```
@@ -86,7 +101,7 @@ Update `app.json` plugin options to match:
 {
   "domain": "api.teachlink.com",
   "primaryPin": "<CURRENT_CERT_SPKI_SHA256>",
-  "backupPin":  "<NEXT_CERT_SPKI_SHA256>"
+  "backupPin": "<NEXT_CERT_SPKI_SHA256>"
 }
 ```
 
@@ -106,6 +121,7 @@ Wait for the new build to reach **at least 80% of active users** before proceedi
 ## Step 4 — Rotate the certificate on the server
 
 Deploy `next-cert.pem` to the API server. At this point:
+
 - Users on the **new** build: accept both current and next cert (backup pin matches)
 - Users on the **old** build: only pinned to current cert, which is still active → no disruption
 
