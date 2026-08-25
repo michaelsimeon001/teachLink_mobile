@@ -1,3 +1,13 @@
+## [1.16.3](https://github.com/rinafcode/teachLink_mobile/compare/v1.16.2...v1.16.3) (2026-08-25)
+
+
+### Bug Fixes
+
+* **api:** distinguish CORS failures from generic network errors in interceptors ([#919](https://github.com/rinafcode/teachLink_mobile/issues/919)) ([9dd63c4](https://github.com/rinafcode/teachLink_mobile/commit/9dd63c431be3e9021367e538e56386dc29c769ce))
+* **ci:** correct workflow name from ci-optimized to ci in monitor-build-times.yml ([#916](https://github.com/rinafcode/teachLink_mobile/issues/916)) ([d17ffed](https://github.com/rinafcode/teachLink_mobile/commit/d17ffed1fdaea5361ed1e759806749c43b3c6b9f))
+* **ssl:** default to pinning enabled when EXPO_PUBLIC_APP_ENV is unset or misspelled ([#918](https://github.com/rinafcode/teachLink_mobile/issues/918)) ([39749a4](https://github.com/rinafcode/teachLink_mobile/commit/39749a41935ee0a01c8ddbe9f8251b2b5a2a1bcc))
+* **ssl:** read pin hashes from env vars, fail if placeholder or missing ([#917](https://github.com/rinafcode/teachLink_mobile/issues/917)) ([d7c24b4](https://github.com/rinafcode/teachLink_mobile/commit/d7c24b424f8ff9c757d1f44434a0633c9916f241))
+
 ## [1.16.2](https://github.com/rinafcode/teachLink_mobile/compare/v1.16.1...v1.16.2) (2026-08-25)
 
 
