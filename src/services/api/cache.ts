@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { resolveEndpointPersistence } from '../../config/apiCacheConfig';
+import { encryptedGetItem, encryptedSetItem } from '../../utils/encryptedStorage';
 import { AnalyticsEvent } from '../../utils/trackingEvents';
 import { mobileAnalyticsService } from '../mobileAnalytics';
 
@@ -11,6 +13,9 @@ export interface CacheOptions {
   tags?: string[];
   dataType?: string;
   critical?: boolean;
+  persist?: boolean;
+  sensitive?: boolean;
+  encrypted?: boolean;
 }
 
 interface CacheEntry<T> {
@@ -22,6 +27,9 @@ interface CacheEntry<T> {
   tags: string[];
   dataType: string;
   critical: boolean;
+  persist: boolean;
+  sensitive: boolean;
+  encrypted: boolean;
   sizeBytes: number; // calculated size of this entry
 }
 
@@ -68,21 +76,31 @@ function storageKeyFor(key: string): string {
   return `${CACHE_STORAGE_PREFIX}${encodeURIComponent(key)}`;
 }
 
-function normalizeOptions(options?: string | CacheOptions): Required<CacheOptions> {
+function normalizeOptions(
+  options: string | CacheOptions | undefined,
+  key: string
+): Required<CacheOptions> {
   if (typeof options === 'string') {
     return {
       dataVersion: options,
       tags: [],
       dataType: 'generic',
       critical: false,
+      persist: resolveEndpointPersistence(key),
+      sensitive: false,
+      encrypted: false,
     };
   }
 
+  const sensitive = options?.sensitive ?? false;
   return {
     dataVersion: options?.dataVersion,
     tags: options?.tags ?? [],
     dataType: options?.dataType ?? 'generic',
     critical: options?.critical ?? false,
+    persist: !sensitive && (options?.persist ?? resolveEndpointPersistence(key)),
+    sensitive,
+    encrypted: options?.encrypted ?? false,
   };
 }
 
@@ -342,13 +360,23 @@ function maybeReportCacheStats(reason: string): void {
 }
 
 async function persistCacheEntry<T>(key: string, entry: CacheEntry<T>): Promise<void> {
+  if (!entry.persist || entry.sensitive) {
+    return;
+  }
+
   try {
     const envelope: PersistedCacheEnvelope<T> = {
       schemaVersion: 1,
       key,
       entry,
     };
-    await AsyncStorage.setItem(storageKeyFor(key), JSON.stringify(envelope));
+    const storageKey = storageKeyFor(key);
+    const serialized = JSON.stringify(envelope);
+    if (entry.encrypted) {
+      await encryptedSetItem(storageKey, serialized);
+    } else {
+      await AsyncStorage.setItem(storageKey, serialized);
+    }
   } catch {
     // Some response bodies may not be serializable. Keep the memory tier.
   }
@@ -356,13 +384,31 @@ async function persistCacheEntry<T>(key: string, entry: CacheEntry<T>): Promise<
 
 async function readPersistentCache<T>(key: string): Promise<CacheEntry<T> | null> {
   try {
-    const raw = await AsyncStorage.getItem(storageKeyFor(key));
+    const storageKey = storageKeyFor(key);
+    const raw = await AsyncStorage.getItem(storageKey);
     if (!raw) {
       return null;
     }
 
-    const envelope = JSON.parse(raw) as PersistedCacheEnvelope<T>;
-    if (envelope.schemaVersion !== 1 || envelope.key !== key || !envelope.entry) {
+    let envelope: PersistedCacheEnvelope<T>;
+    try {
+      envelope = JSON.parse(raw) as PersistedCacheEnvelope<T>;
+    } catch {
+      const decrypted = await encryptedGetItem(storageKey);
+      if (!decrypted) {
+        await removePersistentCache(key);
+        return null;
+      }
+      envelope = JSON.parse(decrypted) as PersistedCacheEnvelope<T>;
+    }
+
+    if (
+      envelope.schemaVersion !== 1 ||
+      envelope.key !== key ||
+      !envelope.entry ||
+      envelope.entry.persist !== true ||
+      envelope.entry.sensitive === true
+    ) {
       await removePersistentCache(key);
       return null;
     }
@@ -443,7 +489,7 @@ export function setCache<T>(
   staleTtl: number,
   dataVersionOrOptions?: string | CacheOptions
 ): void {
-  const options = normalizeOptions(dataVersionOrOptions);
+  const options = normalizeOptions(dataVersionOrOptions, key);
   const dataSize = estimateSize(data);
   const sizeBytes = dataSize + key.length * 2 + 128; // approx 128 bytes metadata overhead
 
@@ -456,6 +502,9 @@ export function setCache<T>(
     tags: options.tags,
     dataType: options.dataType,
     critical: options.critical,
+    persist: options.persist,
+    sensitive: options.sensitive,
+    encrypted: options.encrypted,
     sizeBytes,
   };
 
@@ -690,7 +739,7 @@ export async function fetchWithSWR<T>(
   staleTtl = 300_000,
   options?: string | CacheOptions
 ): Promise<T> {
-  const normalizedOptions = normalizeOptions(options);
+  const normalizedOptions = normalizeOptions(options, key);
   const memoryEntry = getMemoryEntry<T>(key);
 
   if (memoryEntry !== null) {
