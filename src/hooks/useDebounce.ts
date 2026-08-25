@@ -37,7 +37,7 @@ export function useDebounceCallback<Args extends any[]>(
   delay: number
 ): (...args: Args) => void {
   const callbackRef = useRef(callback);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep callback reference updated to avoid needing it in dependency array
   useEffect(() => {

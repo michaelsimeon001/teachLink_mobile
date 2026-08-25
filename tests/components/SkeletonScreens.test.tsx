@@ -2,6 +2,7 @@ import { render } from '@testing-library/react-native';
 import React from 'react';
 
 import { CourseViewerSkeleton } from '../../src/components/mobile/CourseViewerSkeleton';
+import { DataGridSkeleton } from '../../src/components/mobile/DataGridSkeleton';
 import { QuizSkeleton } from '../../src/components/mobile/QuizSkeleton';
 import { SettingsSkeleton } from '../../src/components/mobile/SettingsSkeleton';
 import { SubscriptionSkeleton } from '../../src/components/mobile/SubscriptionSkeleton';
@@ -55,5 +56,26 @@ describe('SubscriptionSkeleton', () => {
     const { toJSON } = render(<SubscriptionSkeleton />);
     const json = JSON.stringify(toJSON());
     expect(json).toContain('Animated.View');
+  });
+});
+
+describe('DataGridSkeleton', () => {
+  it('renders without crashing', () => {
+    const { toJSON } = render(<DataGridSkeleton />);
+    expect(toJSON()).toBeTruthy();
+  });
+
+  it('contains skeleton elements', () => {
+    const { toJSON } = render(<DataGridSkeleton />);
+    const json = JSON.stringify(toJSON());
+    expect(json).toContain('Animated.View');
+  });
+
+  it('produces deterministic widths across re-renders', () => {
+    const { toJSON, rerender } = render(<DataGridSkeleton />);
+    const first = JSON.stringify(toJSON());
+    rerender(<DataGridSkeleton />);
+    const second = JSON.stringify(toJSON());
+    expect(first).toBe(second);
   });
 });

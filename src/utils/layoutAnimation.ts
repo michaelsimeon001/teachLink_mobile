@@ -128,7 +128,7 @@ export function getOptimizedPreset(): LayoutAnimationConfig {
 // Debouncing to Prevent Layout Thrashing
 // ─────────────────────────────────────────────────────────────────────
 
-let animationTimeout: NodeJS.Timeout | null = null;
+let animationTimeout: ReturnType<typeof setTimeout> | null = null;
 const ANIMATION_DEBOUNCE_MS = 100;
 
 /**

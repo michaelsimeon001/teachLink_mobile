@@ -33,8 +33,8 @@ export function useOptimizedClipboard(): UseOptimizedClipboardResult {
   const [metrics, setMetrics] = useState<ClipboardOperationMetrics | null>(null);
 
   const isMounted = useRef(true);
-  const successTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const clipboardTtlRef = useRef<NodeJS.Timeout | null>(null);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clipboardTtlRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     isMounted.current = true;

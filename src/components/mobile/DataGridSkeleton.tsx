@@ -3,15 +3,27 @@ import { StyleSheet, View } from 'react-native';
 
 import { Skeleton } from '../ui/Skeleton';
 
+const DATA_GRID_WIDTHS = [
+  [80, 60, 90],
+  [120, 100, 70],
+  [80, 100, 90],
+  [120, 60, 70],
+  [80, 100, 90],
+  [120, 60, 70],
+] as const;
+
 export const DataGridSkeleton = () => {
-  const renderRow = (index: number) => (
-    <View key={`skeleton-row-${index}`} style={styles.row}>
-      <Skeleton width={Math.random() > 0.3 ? 80 : 120} height={14} />
-      <Skeleton width={Math.random() > 0.5 ? 60 : 100} height={14} />
-      <Skeleton width={Math.random() > 0.4 ? 90 : 70} height={14} />
-      <Skeleton width={100} height={14} />
-    </View>
-  );
+  const renderRow = (index: number) => {
+    const widths = DATA_GRID_WIDTHS[index % DATA_GRID_WIDTHS.length];
+    return (
+      <View key={`skeleton-row-${index}`} style={styles.row}>
+        <Skeleton width={widths[0]} height={14} />
+        <Skeleton width={widths[1]} height={14} />
+        <Skeleton width={widths[2]} height={14} />
+        <Skeleton width={100} height={14} />
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
