@@ -55,6 +55,25 @@ function isConflictResponseShape(data: unknown): data is {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
+ * Parses a Retry-After header value (seconds or HTTP-date) into milliseconds.
+ * Returns undefined if the value cannot be parsed.
+ */
+function parseRetryAfterMs(retryAfter: unknown): number | undefined {
+  if (typeof retryAfter !== 'string') return undefined;
+  const trimmed = retryAfter.trim();
+  const asNumber = Number(trimmed);
+  if (!Number.isNaN(asNumber) && asNumber >= 0) {
+    return Math.floor(asNumber * 1000);
+  }
+  const parsedDate = Date.parse(trimmed);
+  if (!Number.isNaN(parsedDate)) {
+    const ms = parsedDate - Date.now();
+    return ms > 0 ? Math.floor(ms) : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Returns true when a network-layer error is consistent with an SSL certificate
  * pin validation failure rather than a routine connectivity loss.
  *
@@ -200,6 +219,7 @@ export const UPLOAD_TIMEOUT_MS = 30_000;
 // via this queue, preventing double-refresh that would invalidate the session.
 
 let isRefreshing = false;
+let refreshStartTime = 0;
 
 const MAX_QUEUE_SIZE = 50;
 
@@ -316,7 +336,9 @@ apiClient.interceptors.response.use(
     // here). Increment the miss counter so the 60 s flush captures real network usage.
     recordCacheMiss();
 
-    // Successful login clears the client-side lockout counter
+    // Successful login resets the client-side auth-failure counter.
+    // This is a UX affordance only; the actual security boundary is server-side
+    // rate limiting on /auth/login (per account and per IP).
     if (cfg.url?.includes('/auth/login')) {
       useAppStore.getState().resetAuthFailures();
     }
@@ -428,8 +450,10 @@ apiClient.interceptors.response.use(
 
     // ─── 401: Token refresh flow ───────────────────────────────────────────
 
-    // Count consecutive bad-credential 401s on the login endpoint so the
-    // client can enforce a lockout before the 5th attempt reaches the server.
+    // Track consecutive bad-credential 401s on the login endpoint so the
+    // client can surface a UX lockout countdown. This is NOT a security control;
+    // an attacker can bypass it by clearing storage or calling the API directly.
+    // The real protection is server-side rate limiting per account and per IP.
     if (status === 401 && originalRequest.url?.includes('/auth/login') && !originalRequest._retry) {
       useAppStore.getState().incrementAuthFailure();
     }
@@ -444,7 +468,23 @@ apiClient.interceptors.response.use(
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           if (refreshQueue.length >= MAX_QUEUE_SIZE) {
-            return reject(new Error('Token refresh queue is full.'));
+            const overflowError = new Error('Session expired due to refresh queue overflow.');
+            const elapsedMs = refreshStartTime ? Date.now() - refreshStartTime : 0;
+
+            sentryContextService.captureException(overflowError, {
+              tags: { 'auth.refresh_queue_overflow': 'true' },
+              extra: {
+                queueDepth: refreshQueue.length,
+                elapsedRefreshMs: elapsedMs,
+              },
+            });
+
+            useAppStore.getState().setSessionExpiredModalVisible(true);
+            useAppStore.getState().logout();
+
+            processRefreshQueue(null, overflowError);
+
+            return reject(overflowError);
           }
           refreshQueue.push({
             resolve: (token: string) => {
@@ -457,6 +497,7 @@ apiClient.interceptors.response.use(
       }
 
       isRefreshing = true;
+      refreshStartTime = Date.now();
 
       try {
         const refreshToken = await getRefreshToken();
@@ -485,6 +526,7 @@ apiClient.interceptors.response.use(
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
+        refreshStartTime = 0;
       }
     }
 
@@ -567,6 +609,33 @@ apiClient.interceptors.response.use(
     // ─── 429: Rate limit (exponential backoff) ─────────────────────────────
 
     if (status === 429) {
+      const isLoginRequest = originalRequest.url?.includes('/auth/login');
+
+      if (isLoginRequest) {
+        const retryAfterHeader = error.response?.headers?.['retry-after'];
+        const retryAfterMs = parseRetryAfterMs(retryAfterHeader);
+
+        if (retryAfterMs) {
+          const lockUntil = Date.now() + retryAfterMs;
+          useAppStore.getState().setAuthLockedUntil(lockUntil);
+          appLogger.warnSync('Login rate-limited by server; honouring Retry-After', {
+            retryAfterMs,
+            lockUntil,
+            endpoint: originalRequest.url,
+          });
+        } else {
+          appLogger.warnSync('Login rate-limited but no Retry-After header; applying default UX lockout', {
+            endpoint: originalRequest.url,
+          });
+        }
+
+        return Promise.reject({
+          message: 'Too many login attempts. Please wait before trying again.',
+          status: 429,
+          code: 'RATE_LIMIT_EXCEEDED',
+        });
+      }
+
       originalRequest._retryCount = originalRequest._retryCount || 0;
 
       if (originalRequest._retryCount < MAX_RATE_LIMIT_RETRIES) {

@@ -98,6 +98,8 @@ jest.mock('../src/store', () => ({
       incrementAuthFailure: jest.fn(),
       resetAuthFailures: jest.fn(),
       incrementRefreshFailure: jest.fn(),
+      setSessionExpiredModalVisible: jest.fn(),
+      setAuthLockedUntil: jest.fn(),
     })),
   },
 }));
@@ -245,6 +247,8 @@ describe('Issue #838 — axios.config error handling branches', () => {
           incrementAuthFailure: jest.fn(),
           resetAuthFailures: jest.fn(),
           incrementRefreshFailure: jest.fn(),
+          setSessionExpiredModalVisible: jest.fn(),
+          setAuthLockedUntil: jest.fn(),
         })),
       },
     }));
@@ -580,5 +584,57 @@ describe('Issue #838 — axios.config error handling branches', () => {
     const error = buildSanitizedApiError(418, 'SOME_CODE');
     expect(error.message).toBeDefined();
     expect(error.status).toBe(418);
+  });
+
+  // ── 11. Refresh queue overflow → logout + modal ────────────────────────────
+  it('11. refresh queue overflow triggers logout and session expired modal', async () => {
+    const mockLogout = jest.fn();
+    const mockSetSessionExpiredModalVisible = jest.fn();
+    const { useAppStore } = require('../src/store');
+    useAppStore.getState.mockReturnValue({
+      isAuthenticated: true,
+      sessionExpiresAt: Date.now() + 3600_000,
+      logout: mockLogout,
+      incrementAuthFailure: jest.fn(),
+      resetAuthFailures: jest.fn(),
+      incrementRefreshFailure: jest.fn(),
+      setSessionExpiredModalVisible: mockSetSessionExpiredModalVisible,
+    });
+
+    const { sentryContextService } = require('../src/services/sentryContext');
+
+    apiClient.defaults.adapter = jest.fn((config: any) => {
+      if (config.url === '/auth/refresh') {
+        return new Promise(() => {});
+      }
+      return Promise.resolve({
+        status: 401,
+        data: {},
+        headers: {},
+        config,
+      });
+    });
+
+    const { getRefreshToken } = require('../src/services/secureStorage');
+    getRefreshToken.mockResolvedValue('refresh-token');
+
+    const promises = Array.from({ length: 52 }, (_, i) =>
+      apiClient.get(`/test-${i}`).catch((e: any) => e)
+    );
+
+    await Promise.resolve();
+
+    expect(mockLogout).toHaveBeenCalledTimes(1);
+    expect(mockSetSessionExpiredModalVisible).toHaveBeenCalledWith(true);
+    expect(sentryContextService.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        tags: { 'auth.refresh_queue_overflow': 'true' },
+        extra: expect.objectContaining({
+          queueDepth: 50,
+          elapsedRefreshMs: expect.any(Number),
+        }),
+      })
+    );
   });
 });

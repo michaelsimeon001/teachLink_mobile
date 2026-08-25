@@ -1,5 +1,5 @@
 /**
- * Fix for issue #783:
+ * Fix for issues #783 and #919:
  * CORS failures and generic network errors both arrive as Axios errors with
  * no `response` (status 0 / Network Error). The interceptors treated them
  * identically, making CORS policy violations invisible in logs and to callers.
@@ -21,7 +21,8 @@ export function classifyNetworkError(error: AxiosError): NetworkFailureKind {
   }
 
   // Axios surfaces CORS failures as a Network Error with no response.
-  // Detect them by the presence of a request but absence of a response.
+  // We can detect them by the presence of a request but absence of a response
+  // combined with a browser/native environment where CORS applies.
   if (error.request && !error.response) {
     const isCorsLikely =
       typeof error.message === 'string' &&

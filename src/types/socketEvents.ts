@@ -33,13 +33,16 @@ export interface PresenceEvent {
   online: boolean;
 }
 
-export type SocketEvent =
-  | LessonProgressEvent
-  | NotificationEvent
-  | QuizGradedEvent
-  | PresenceEvent;
+export interface SocketEventMap {
+  'lesson:progress': LessonProgressEvent;
+  'notification:new': NotificationEvent;
+  'quiz:graded': QuizGradedEvent;
+  'presence:update': PresenceEvent;
+}
 
-export type SocketEventType = SocketEvent['type'];
+export type SocketEvent = SocketEventMap[keyof SocketEventMap];
+
+export type SocketEventType = keyof SocketEventMap;
 
 /** Narrows an incoming payload to one specific event type. */
 export function isSocketEvent<T extends SocketEventType>(

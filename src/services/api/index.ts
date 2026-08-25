@@ -34,6 +34,7 @@ export const apiService = {
           dataType: 'api-read',
           tags: [buildResourceTag(url)],
           critical: ttl <= 30_000,
+          persist: resolveEndpointTtl(url).persistable,
         }
       )
     );
@@ -66,6 +67,7 @@ export {
 export {
   DEFAULT_ENDPOINT_TTL,
   ENDPOINT_TTL_MAP,
+  resolveEndpointPersistence,
   resolveEndpointTtl,
 } from '../../config/apiCacheConfig';
 export { courseApi } from './courseApi';

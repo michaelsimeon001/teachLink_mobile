@@ -1,4 +1,6 @@
 import { AppState, AppStateStatus } from 'react-native';
+import * as Crypto from 'expo-crypto';
+import * as SecureStore from 'expo-secure-store';
 import { MMKV } from 'react-native-mmkv';
 import { io, Socket } from 'socket.io-client';
 
@@ -8,6 +10,7 @@ import { getEnv } from '../../config';
 import { appLogger } from '../../utils/logger';
 import syncEntityManager from '../sync/syncEntityManager';
 
+import type { SocketEventMap, SocketEventType } from '../../types/socketEvents';
 import type { ConflictResolutionStrategy, VersionedSyncMessage } from '../sync/types';
 
 
@@ -15,19 +18,36 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 5_000;
 const QUEUE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const QUEUE_STORAGE_KEY = 'socket:outgoing-queue';
+export const MAX_QUEUE_LENGTH = 100;
+const SOCKET_MMKV_KEY = 'teachlink_socket_mmkv_key';
 
 const BACKOFF_DELAYS = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
 
-interface QueuedMessage {
-  id: string;
-  event: string;
-  data: Record<string, any>;
-  timestamp: number;
+type QueuedMessage = {
+  [EventName in SocketEventType]: {
+    id: string;
+    event: EventName;
+    data: SocketEventMap[EventName];
+    timestamp: number;
+  };
+}[SocketEventType];
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-const mmkv = new MMKV();
+async function createEncryptedStorage(): Promise<MMKV> {
+  let encryptionKey = await SecureStore.getItemAsync(SOCKET_MMKV_KEY);
+  if (!encryptionKey) {
+    encryptionKey = bytesToHex(Crypto.getRandomBytes(32));
+    await SecureStore.setItemAsync(SOCKET_MMKV_KEY, encryptionKey);
+  }
+  return new MMKV({ id: 'teachlink-socket', encryptionKey });
+}
 
 class SocketService {
+  private readonly storageReady = createEncryptedStorage();
+  private mmkv: MMKV | null = null;
   private socket: Socket | null = null;
   private stableConnectionTimeout?: NodeJS.Timeout;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -39,9 +59,10 @@ class SocketService {
   private appStateSubscription: ReturnType<typeof AppState.addEventListener> | null = null;
   private outgoingQueue: QueuedMessage[] = [];
 
-  connect() {
+  async connect() {
     if (this.socket?.connected) return this.socket;
 
+    this.mmkv = await this.storageReady;
     this.restoreQueue();
 
     if (!this.appStateSubscription) {
@@ -200,19 +221,34 @@ class SocketService {
     }
   }
 
-  emit(event: string, data: Record<string, any>) {
+  async emit<EventName extends SocketEventType>(
+    event: EventName,
+    data: SocketEventMap[EventName]
+  ): Promise<void>;
+  async emit(event: string, data: unknown): Promise<void>;
+  async emit(event: string, data: unknown): Promise<void> {
+    await this.storageReady.then(storage => {
+      this.mmkv = storage;
+    });
     const start = performance.now();
-    const encoded = encodeBinaryMessage(event, data);
+    const encoded = encodeBinaryMessage(event, data as Record<string, any>);
     const sizeBytes = encoded.byteLength;
 
     if (!this.socket?.connected) {
       const queuedMessage: QueuedMessage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         event,
-        data,
+        data: data as never,
         timestamp: Date.now(),
       };
       this.outgoingQueue.push(queuedMessage);
+      if (this.outgoingQueue.length > MAX_QUEUE_LENGTH) {
+        const evictedCount = this.outgoingQueue.length - MAX_QUEUE_LENGTH;
+        this.outgoingQueue.splice(0, evictedCount);
+        appLogger.warn(
+          `[Socket Queue] Evicted ${evictedCount} oldest message(s); maximum queue length is ${MAX_QUEUE_LENGTH}`,
+        );
+      }
       this.persistQueue();
       appLogger.info(`[Socket Queue] Message queued: ${event} (queue size: ${this.outgoingQueue.length})`);
       return;
@@ -334,22 +370,28 @@ class SocketService {
     return 'merge';
   }
 
-  persistQueue(): void {
+  async persistQueue(): Promise<void> {
     try {
-      mmkv.set(QUEUE_STORAGE_KEY, JSON.stringify(this.outgoingQueue));
+      const storage = await this.storageReady;
+      this.mmkv = storage;
+      storage.set(QUEUE_STORAGE_KEY, JSON.stringify(this.outgoingQueue));
     } catch (error) {
       appLogger.error('Failed to persist socket message queue:', error);
     }
   }
 
-  restoreQueue(): void {
+  async restoreQueue(): Promise<void> {
     try {
-      const raw = mmkv.getString(QUEUE_STORAGE_KEY);
+      const storage = await this.storageReady;
+      this.mmkv = storage;
+      const raw = storage.getString(QUEUE_STORAGE_KEY);
       if (!raw) return;
 
       const stored: QueuedMessage[] = JSON.parse(raw);
       const now = Date.now();
-      this.outgoingQueue = stored.filter(msg => now - msg.timestamp < QUEUE_TTL_MS);
+      this.outgoingQueue = stored
+        .filter(msg => now - msg.timestamp < QUEUE_TTL_MS)
+        .sort((left, right) => left.timestamp - right.timestamp);
 
       const expiredCount = stored.length - this.outgoingQueue.length;
       if (expiredCount > 0) {
@@ -358,10 +400,18 @@ class SocketService {
       if (this.outgoingQueue.length > 0) {
         appLogger.info(`[Socket Queue] Restored ${this.outgoingQueue.length} queued messages`);
       }
-      this.persistQueue();
+      if (this.outgoingQueue.length > MAX_QUEUE_LENGTH) {
+        const evictedCount = this.outgoingQueue.length - MAX_QUEUE_LENGTH;
+        this.outgoingQueue = this.outgoingQueue.slice(-MAX_QUEUE_LENGTH);
+        appLogger.warn(
+          `[Socket Queue] Evicted ${evictedCount} oldest restored message(s); maximum queue length is ${MAX_QUEUE_LENGTH}`,
+        );
+      }
+      await this.persistQueue();
     } catch (error) {
       appLogger.error('Failed to restore socket message queue:', error);
       this.outgoingQueue = [];
+      this.mmkv?.delete(QUEUE_STORAGE_KEY);
     }
   }
 
