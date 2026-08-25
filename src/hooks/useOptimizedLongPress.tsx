@@ -52,7 +52,7 @@ export function useOptimizedLongPress(options: UseOptimizedLongPressOptions) {
   } = options;
 
   // Track long press state
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const firedRef = useRef(false);
   const startXRef = useRef(0);
   const startYRef = useRef(0);

@@ -176,7 +176,7 @@ const App = () => {
   useReviewMetrics();
 
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [appIsReady, setAppIsReady] = React.useState(false);
   const [showPreferencesResetToast, setShowPreferencesResetToast] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);

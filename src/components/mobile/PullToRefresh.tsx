@@ -22,6 +22,11 @@ export interface PullToRefreshProps {
   ScrollComponent?: AnyScrollComponent;
   /** Props forwarded to the scroll component (data/renderItem/etc. for lists). */
   scrollProps?: Record<string, unknown>;
+  /**
+   * Required keyExtractor when ScrollComponent is a FlatList or SectionList.
+   * Ensures items retain identity across refreshes and avoids index-based remounts.
+   */
+  keyExtractor?: (item: any, index: number) => string;
   /** Content to render inside ScrollView-like components. */
   children?: React.ReactNode;
 
@@ -62,6 +67,7 @@ export const PullToRefresh = (props: PullToRefreshProps) => {
   const {
     ScrollComponent = Animated.ScrollView,
     scrollProps,
+    keyExtractor,
     children,
     onRefresh,
     refreshing: refreshingProp,
@@ -249,6 +255,7 @@ export const PullToRefresh = (props: PullToRefreshProps) => {
           // Keep scroll smooth; only our outer responder captures when at top + pulling down.
           scrollEventThrottle={16}
           {...(scrollProps as any)}
+          {...(keyExtractor ? { keyExtractor } : {})}
           onScroll={onScroll}
         >
           {children}

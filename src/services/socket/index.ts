@@ -49,7 +49,7 @@ class SocketService {
   private readonly storageReady = createEncryptedStorage();
   private mmkv: MMKV | null = null;
   private socket: Socket | null = null;
-  private stableConnectionTimeout?: NodeJS.Timeout;
+  private stableConnectionTimeout?: ReturnType<typeof setTimeout>;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private backoffIndex = 0;
