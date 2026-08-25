@@ -198,4 +198,41 @@ describe('Socket Queue Persistence', () => {
 
     expect(parsed).toEqual([]);
   });
+
+  it('should not duplicate messages on double-connect', () => {
+    const now = Date.now();
+    const messages: QueuedMessage[] = [
+      {
+        id: 'msg-1',
+        event: 'chat_message',
+        data: { text: 'hello' },
+        timestamp: now,
+      },
+      {
+        id: 'msg-2',
+        event: 'typing_indicator',
+        data: { isTyping: true },
+        timestamp: now,
+      },
+    ];
+
+    mmkvInstance.set(QUEUE_STORAGE_KEY, JSON.stringify(messages));
+
+    // Simulate restore: read from storage
+    const raw = mmkvInstance.getString(QUEUE_STORAGE_KEY);
+    const stored: QueuedMessage[] = JSON.parse(raw!);
+
+    // First restore: merge into empty queue
+    const queue1: QueuedMessage[] = [];
+    const ids1 = new Set(queue1.map(m => m.id));
+    const merged1 = [...queue1, ...stored.filter(m => !ids1.has(m.id))];
+    expect(merged1).toHaveLength(2);
+
+    // Second restore (double-connect): merge into existing queue
+    const ids2 = new Set(merged1.map(m => m.id));
+    const merged2 = [...merged1, ...stored.filter(m => !ids2.has(m.id))];
+    expect(merged2).toHaveLength(2); // Still 2, not 4
+    expect(merged2[0].id).toBe('msg-1');
+    expect(merged2[1].id).toBe('msg-2');
+  });
 });
