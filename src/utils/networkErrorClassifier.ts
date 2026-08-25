@@ -1,5 +1,5 @@
 /**
- * Fix for issue #919:
+ * Fix for issues #783 and #919:
  * CORS failures and generic network errors both arrive as Axios errors with
  * no `response` (status 0 / Network Error). The interceptors treated them
  * identically, making CORS policy violations invisible in logs and to callers.

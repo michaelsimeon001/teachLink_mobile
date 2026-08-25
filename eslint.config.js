@@ -5,6 +5,8 @@
 const { defineConfig } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
 const jsxA11yPlugin = require('eslint-plugin-jsx-a11y');
+// Fix for issue #910: register @typescript-eslint plugin so ban-ts-comment rule resolves
+const tsPlugin = require('@typescript-eslint/eslint-plugin');
 
 module.exports = defineConfig([
   expoConfig,
@@ -15,6 +17,7 @@ module.exports = defineConfig([
     files: ['**/*.{js,jsx,ts,tsx}'],
     plugins: {
       'jsx-a11y': jsxA11yPlugin,
+      '@typescript-eslint': tsPlugin,
     },
     settings: {
       react: {
@@ -29,10 +32,6 @@ module.exports = defineConfig([
     },
     rules: {
       // #809: Require a justification comment on every @ts-ignore or @ts-expect-error.
-      // @ts-ignore suppresses ALL type errors on the next line without verifying they
-      // still exist; it is easy to forget and leaves dead suppressions in the codebase.
-      // @ts-expect-error is safer (fails if the suppression is no longer needed) but
-      // still requires a minimum-length reason so reviewers can evaluate legitimacy.
       '@typescript-eslint/ban-ts-comment': [
         'error',
         {
@@ -90,10 +89,6 @@ module.exports = defineConfig([
       'jsx-a11y/aria-proptypes': 'warn',
       'jsx-a11y/aria-unsupported-elements': 'warn',
 
-      // Enforce structured logging — use src/utils/logger instead of console.*
-      // Logger internals may reference console internally (excluded via ignores above).
-      // Note: `{ allow: [] }` is rejected by ESLint 9's rule schema, so use the
-      // bare 'error' form, which disallows every console method.
       'no-console': ['error', { allow: ['warn', 'error'] }],
     },
   },
