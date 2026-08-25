@@ -200,6 +200,7 @@ export const UPLOAD_TIMEOUT_MS = 30_000;
 // via this queue, preventing double-refresh that would invalidate the session.
 
 let isRefreshing = false;
+let refreshStartTime = 0;
 
 const MAX_QUEUE_SIZE = 50;
 
@@ -444,7 +445,23 @@ apiClient.interceptors.response.use(
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           if (refreshQueue.length >= MAX_QUEUE_SIZE) {
-            return reject(new Error('Token refresh queue is full.'));
+            const overflowError = new Error('Session expired due to refresh queue overflow.');
+            const elapsedMs = refreshStartTime ? Date.now() - refreshStartTime : 0;
+
+            sentryContextService.captureException(overflowError, {
+              tags: { 'auth.refresh_queue_overflow': 'true' },
+              extra: {
+                queueDepth: refreshQueue.length,
+                elapsedRefreshMs: elapsedMs,
+              },
+            });
+
+            useAppStore.getState().setSessionExpiredModalVisible(true);
+            useAppStore.getState().logout();
+
+            processRefreshQueue(null, overflowError);
+
+            return reject(overflowError);
           }
           refreshQueue.push({
             resolve: (token: string) => {
@@ -457,6 +474,7 @@ apiClient.interceptors.response.use(
       }
 
       isRefreshing = true;
+      refreshStartTime = Date.now();
 
       try {
         const refreshToken = await getRefreshToken();
@@ -485,6 +503,7 @@ apiClient.interceptors.response.use(
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
+        refreshStartTime = 0;
       }
     }
 
