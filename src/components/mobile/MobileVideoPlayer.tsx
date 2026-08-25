@@ -26,6 +26,7 @@ import {
 } from '../../services/videoQuality';
 import { ErrorBoundary } from '../common/ErrorBoundary';
 import { positionStore } from '../../services/positionStore';
+import { scheduleAnimationFrame } from '../../utils/animationScheduler';
 
 const AUTO_HIDE_MS = 3000;
 const DEFAULT_ASPECT_RATIO = 16 / 9;
@@ -145,7 +146,7 @@ const MobileVideoPlayer = ({
   }, []);
 
   const { isPiPSupported, isPiPActive, enterPiP, exitPiP } = usePictureInPicture({
-    videoRef,
+    videoRef: videoRef as React.RefObject<Video>,
     isPlaying,
   });
 
@@ -411,7 +412,6 @@ const MobileVideoPlayer = ({
       }
     },
     [autoPlay, isSwitchingQuality, onEnd, onError, onPlaybackStatusUpdate, attemptRecovery]
-    [autoPlay, isSwitchingQuality, onEnd, onError, onPlaybackStatusUpdate]
   );
 
   useEffect(() => {

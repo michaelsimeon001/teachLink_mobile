@@ -240,7 +240,6 @@ jest.mock('react-native-iap', () => ({
   initConnection: jest.fn(() => Promise.resolve(true)),
   endConnection: jest.fn(),
   getProducts: jest.fn(() => Promise.resolve([])),
-  getSubscriptions: jest.fn(() => Promise.resolve([])),
   requestPurchase: jest.fn(() => Promise.resolve({})),
   requestSubscription: jest.fn(() => Promise.resolve({})),
   finishTransaction: jest.fn(() => Promise.resolve(true)),
@@ -491,3 +490,9 @@ jest.mock('expo-clipboard', () => ({
   addClipboardListener: jest.fn(() => ({ remove: jest.fn() })),
   removeClipboardListener: jest.fn(),
 }), { virtual: true });
+
+// Clean up any open handles from axios.config.ts interval
+const { stopCacheStatsFlush } = require('./src/services/api/axios.config');
+afterAll(() => {
+  stopCacheStatsFlush();
+});

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 
+import { startCacheStatsFlush, stopCacheStatsFlush, flushCacheStatsNow } from '../services/api/axios.config';
 import { mobileAnalyticsService } from '@/services/mobileAnalytics';
 import { useDeviceStore } from '@/store/deviceStore';
 import { AnalyticsEvent } from '@/utils/trackingEvents';
@@ -10,12 +11,21 @@ const AppLifecycleManager = () => {
   const appStateRef = useRef<AppStateStatus>(AppState.currentState as AppStateStatus);
 
   useEffect(() => {
+    startCacheStatsFlush();
+
     const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
       const prev = appStateRef.current;
       appStateRef.current = nextState;
 
       const isBackground = nextState !== 'active';
       setIsInBackground(isBackground);
+
+      if (isBackground) {
+        flushCacheStatsNow();
+        stopCacheStatsFlush();
+      } else {
+        startCacheStatsFlush();
+      }
 
       // Track transitions for monitoring battery/behavior impact
       mobileAnalyticsService.trackEvent(
@@ -25,6 +35,7 @@ const AppLifecycleManager = () => {
     });
 
     return () => {
+      stopCacheStatsFlush();
       subscription.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
