@@ -1,3 +1,13 @@
+## [1.16.1](https://github.com/rinafcode/teachLink_mobile/compare/v1.16.0...v1.16.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* **api:** route SESSION_EXPIRED rejection through buildSanitizedApiError ([#927](https://github.com/rinafcode/teachLink_mobile/issues/927)) ([7064711](https://github.com/rinafcode/teachLink_mobile/commit/7064711a35a50582ac3d3920fa44989ab85ae2df))
+* **api:** use dedicated refreshClient to avoid interceptor re-entry on token refresh ([#926](https://github.com/rinafcode/teachLink_mobile/issues/926)) ([02f6827](https://github.com/rinafcode/teachLink_mobile/commit/02f6827fbbc6c7d79915ac0628941fb3a0598452))
+* **audit:** use npm ci instead of npm install to match lockfile ([#925](https://github.com/rinafcode/teachLink_mobile/issues/925)) ([1bf42fd](https://github.com/rinafcode/teachLink_mobile/commit/1bf42fd838c2336760114d66510e3dc0edd32202))
+* **ci:** add permissions block to restrict GITHUB_TOKEN scope ([#924](https://github.com/rinafcode/teachLink_mobile/issues/924)) ([02d261e](https://github.com/rinafcode/teachLink_mobile/commit/02d261eb5ddc8454fbe2b839cf844fdceae1b305))
+
 # [1.16.0](https://github.com/rinafcode/teachLink_mobile/compare/v1.15.0...v1.16.0) (2026-08-25)
 
 
