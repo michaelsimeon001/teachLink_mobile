@@ -48,7 +48,7 @@
     "analyze:routes": "node scripts/analyzeRouteSizes.js",
     "analyze:routes:report": "node scripts/analyzeRouteSizes.js --report",
     "validate:openapi": "node scripts/validateOpenApi.js",
-    "validate-env": "node -e \"if (!process.env.EXPO_PUBLIC_SENTRY_DSN) { console.error('ERROR: EXPO_PUBLIC_SENTRY_DSN is not set.'); process.exit(1); }\""
+    "validate-env": "tsx scripts/validate-env.ts"
   },
   "dependencies": {
     "@expo/config-plugins": "^56.0.9",

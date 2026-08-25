@@ -1,18 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-    clearCache,
-    fetchWithSWR,
-    getCache,
-    getCacheStats,
-    getCacheStatus,
-    invalidateCacheByDataVersion,
-    invalidateCacheByTags,
-    invalidateCacheForBatchRequests,
-    invalidateCacheForMutation,
-    resetCacheStats,
-    setCache,
-    setMaxCacheSize,
+  clearCache,
+  fetchWithSWR,
+  getCache,
+  getCacheStats,
+  getCacheStatus,
+  invalidateCacheByDataVersion,
+  invalidateCacheByTags,
+  invalidateCacheForBatchRequests,
+  invalidateCacheForMutation,
+  resetCacheStats,
+  setCache,
+  setMaxCacheSize,
 } from '../../../services/api/cache';
 
 const mockedAsyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
@@ -113,29 +113,32 @@ describe('LRU cache eviction and stats', () => {
 });
 
 describe('three-tier cache behavior', () => {
-  it('persists network results with cache metadata for the AsyncStorage tier', async () => {
+  it('keeps sensitive entries in memory without persisting them', async () => {
     setCache('users:u1', { id: 'u1', name: 'Ada' }, 60_000, 300_000, {
       dataType: 'user-profile',
       tags: ['users', 'user:u1'],
       critical: true,
+      persist: true,
+      sensitive: true,
     });
 
     await Promise.resolve();
     await Promise.resolve();
 
+    expect(mockedAsyncStorage.setItem).not.toHaveBeenCalled();
+    expect(getCache('users:u1')).toEqual({ id: 'u1', name: 'Ada' });
+  });
+
+  it('persists allowlisted course entries by default', async () => {
+    setCache('courses:course-1', { id: 'course-1', title: 'Math' }, 60_000, 300_000);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
     expect(mockedAsyncStorage.setItem).toHaveBeenCalledWith(
-      '@teachlink/api-cache:users%3Au1',
+      '@teachlink/api-cache:courses%3Acourse-1',
       expect.any(String)
     );
-
-    const [, rawEnvelope] = mockedAsyncStorage.setItem.mock.calls[0];
-    const envelope = JSON.parse(rawEnvelope);
-
-    expect(envelope.key).toBe('users:u1');
-    expect(envelope.entry.data).toEqual({ id: 'u1', name: 'Ada' });
-    expect(envelope.entry.tags).toEqual(['users', 'user:u1']);
-    expect(envelope.entry.dataType).toBe('user-profile');
-    expect(envelope.entry.critical).toBe(true);
   });
 
   it('hydrates from AsyncStorage before hitting the network', async () => {
@@ -151,6 +154,8 @@ describe('three-tier cache behavior', () => {
           tags: ['users', 'user:u1'],
           dataType: 'user-profile',
           critical: true,
+          persist: false,
+          sensitive: true,
           sizeBytes: 180,
         },
       })
@@ -194,9 +199,11 @@ describe('three-tier cache behavior', () => {
     setCache('users:u1', { id: 'u1', name: 'Ada' }, 60_000, 30_000);
     await new Promise(resolve => setTimeout(resolve, 5));
 
-    const fetcher = jest.fn().mockImplementation(
-      () => new Promise(resolve => setTimeout(() => resolve({ id: 'u1', name: 'Grace' }), 10))
-    );
+    const fetcher = jest
+      .fn()
+      .mockImplementation(
+        () => new Promise(resolve => setTimeout(() => resolve({ id: 'u1', name: 'Grace' }), 10))
+      );
 
     const responsePromise = fetchWithSWR('users:u1', fetcher, 1, 30_000);
 
