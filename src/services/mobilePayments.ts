@@ -178,7 +178,7 @@ class MobilePaymentsService {
       await IAP.initConnection();
 
       IAP.purchaseUpdatedListener(async purchase => {
-        const receipt = purchase.transactionReceipt;
+        const receipt = purchase.transactionId;
         if (!receipt) return;
 
         const store = useAppStore.getState();
@@ -232,7 +232,7 @@ class MobilePaymentsService {
    */
   async getProducts(productIds: string[]): Promise<SubscriptionPlan[]> {
     try {
-      const storeProducts = await IAP.getSubscriptions({ skus: productIds });
+      const storeProducts = await IAP.getProducts({ skus: productIds });
       return storeProducts.map(sp => {
         const plan = SUBSCRIPTION_PLANS.find(p => p.productId === sp.productId);
         return {
@@ -267,7 +267,7 @@ class MobilePaymentsService {
     if (!plan) throw new Error(`Unknown product: ${productId}`);
 
     try {
-      await IAP.requestSubscription({ sku: productId });
+      await IAP.requestSubscription({ skus: [productId] });
 
       // The actual purchase completion is handled by purchaseUpdatedListener.
       // For the hook, we await a Promise that resolves when the listener fires.
@@ -306,7 +306,7 @@ class MobilePaymentsService {
   async purchaseProduct(productId: string): Promise<PurchaseRecord> {
     this._throwIfDeviceCompromised();
     try {
-      await IAP.requestPurchase({ sku: productId });
+      await IAP.requestPurchase({ skus: [productId] });
 
       // ── Fallback mock for development ──
       const record: PurchaseRecord = {
@@ -342,7 +342,7 @@ class MobilePaymentsService {
       const validated: PurchaseRecord[] = [];
 
       for (const purchase of available) {
-        const receipt = purchase.transactionReceipt;
+        const receipt = purchase.transactionId;
         if (receipt) {
           const result = await this.validateReceipt(
             receipt,
@@ -354,10 +354,8 @@ class MobilePaymentsService {
               id: purchase.transactionId,
               productId: purchase.productId,
               transactionId: purchase.transactionId,
-              amount: parseFloat(
-                purchase.priceAmountMicros ? String(purchase.priceAmountMicros / 1000000) : '0'
-              ),
-              currency: purchase.priceCurrencyCode ?? 'USD',
+              amount: 0,
+              currency: 'USD',
               type: purchase.productId.includes('subscription') ? 'subscription' : 'one_time',
               status: 'restored',
               purchasedAt: purchase.transactionDate

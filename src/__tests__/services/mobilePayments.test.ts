@@ -49,10 +49,7 @@ function makeNetworkError(): Error {
 const makePurchase = (productId: string, receipt: string) => ({
   productId,
   transactionId: `txn_${productId}`,
-  transactionReceipt: receipt,
   transactionDate: new Date().toISOString(),
-  priceAmountMicros: 9_990_000,
-  priceCurrencyCode: 'USD',
 });
 
 // ─── restorePurchases (#615) ──────────────────────────────────────────────────
@@ -224,7 +221,7 @@ describe('purchaseUpdatedListener (via initialize)', () => {
     await mobilePaymentsService.initialize();
   });
 
-  const MOCK_IAP_PURCHASE = { transactionReceipt: MOCK_RECEIPT, productId: MOCK_PRODUCT_ID };
+  const MOCK_IAP_PURCHASE = { transactionId: MOCK_RECEIPT, productId: MOCK_PRODUCT_ID };
 
   it('sets receiptValidationPending true then false around a successful validation', async () => {
     mockApi.post.mockResolvedValueOnce({ data: { valid: true, tier: 'pro' } });
@@ -278,8 +275,8 @@ describe('purchaseUpdatedListener (via initialize)', () => {
     expect(mockIAP.finishTransaction).not.toHaveBeenCalled();
   });
 
-  it('ignores purchases without a transactionReceipt', async () => {
-    await capturedListener!({ productId: MOCK_PRODUCT_ID, transactionReceipt: undefined });
+  it('ignores purchases without a transactionId', async () => {
+    await capturedListener!({ productId: MOCK_PRODUCT_ID, transactionId: undefined });
 
     expect(mockApi.post).not.toHaveBeenCalled();
     expect(mockStoreState.setReceiptValidationPending).not.toHaveBeenCalled();

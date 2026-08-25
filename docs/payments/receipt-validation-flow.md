@@ -21,7 +21,7 @@ User taps "Subscribe"
 IAP.requestSubscription()   ←── opens native payment sheet
        │
        ▼ (purchase approved by platform)
-purchaseUpdatedListener fires with { transactionReceipt }
+purchaseUpdatedListener fires with { transactionId }
        │
        ├─ receiptValidationPending === true? → skip (duplicate guard)
        │

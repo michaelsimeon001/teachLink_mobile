@@ -188,8 +188,21 @@ function flushCacheStats(): void {
 /** Flush immediately (e.g. on app background). */
 export const flushCacheStatsNow = flushCacheStats;
 
-// Start the periodic flush loop once when the module loads.
-setInterval(flushCacheStats, CACHE_STATS_INTERVAL_MS);
+let _cacheStatsInterval: ReturnType<typeof setInterval> | null = null;
+
+/** Start the periodic cache-stats flush interval. Idempotent. */
+export function startCacheStatsFlush(): void {
+  if (_cacheStatsInterval !== null) return;
+  _cacheStatsInterval = setInterval(flushCacheStats, CACHE_STATS_INTERVAL_MS);
+}
+
+/** Stop the periodic cache-stats flush interval and flush remaining stats. */
+export function stopCacheStatsFlush(): void {
+  if (_cacheStatsInterval === null) return;
+  clearInterval(_cacheStatsInterval);
+  _cacheStatsInterval = null;
+  flushCacheStats();
+}
 
 // ─── Rate Limit Backoff (Issue #141) ──────────────────────────────────────
 

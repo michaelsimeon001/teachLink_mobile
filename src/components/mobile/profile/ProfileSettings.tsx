@@ -1,12 +1,20 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Controller } from 'react-hook-form';
+import { Controller, type Control, type FieldErrors } from 'react-hook-form';
 import { ChevronDown, ChevronUp, User, Mail, MapPin, Globe } from 'lucide-react-native';
 import { MobileFormInput } from '../MobileFormInput';
 
+interface ProfileFormValues {
+  name: string;
+  email: string;
+  bio: string;
+  location: string;
+  website: string;
+}
+
 interface Props {
-  control: any;
-  formErrors: any;
+  control: Control<ProfileFormValues>;
+  formErrors: FieldErrors<ProfileFormValues>;
   showAdvancedFields: boolean;
   onToggleAdvancedFields: () => void;
   isDark?: boolean;
@@ -84,3 +92,30 @@ export const ProfileSettings = React.memo(({ control, formErrors, showAdvancedFi
 });
 
 ProfileSettings.displayName = 'ProfileSettings';
+
+const styles = StyleSheet.create({
+  container: {
+    gap: 12,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 4,
+  },
+  disclosureToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  disclosureToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#19c3e6',
+  },
+  disclosureContent: {
+    gap: 12,
+  },
+});
