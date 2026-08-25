@@ -1,3 +1,13 @@
+## [1.16.2](https://github.com/rinafcode/teachLink_mobile/compare/v1.16.1...v1.16.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* **app.json:** remove cydia from LSApplicationQueriesSchemes ([#923](https://github.com/rinafcode/teachLink_mobile/issues/923)) ([ca27f04](https://github.com/rinafcode/teachLink_mobile/commit/ca27f04d1ec3b8c68f94185417dd039ad3f71e51))
+* **biometrics:** safe-load expo-local-authentication, default to not enrolled on error ([#920](https://github.com/rinafcode/teachLink_mobile/issues/920)) ([29fc78a](https://github.com/rinafcode/teachLink_mobile/commit/29fc78a30812f3017e9cf535a35aa20d7e0b8890))
+* **security:** remove unsafe-eval and wildcard connect-src from trusted CSP tier ([#921](https://github.com/rinafcode/teachLink_mobile/issues/921)) ([ff5ed58](https://github.com/rinafcode/teachLink_mobile/commit/ff5ed58c58abfde114408b431775f65e546a73f1))
+* **utils:** replace Math.random() with crypto-safe ID generation ([#922](https://github.com/rinafcode/teachLink_mobile/issues/922)) ([c730e18](https://github.com/rinafcode/teachLink_mobile/commit/c730e1835b6317153d30f650d9059e387d8368ab))
+
 ## [1.16.1](https://github.com/rinafcode/teachLink_mobile/compare/v1.16.0...v1.16.1) (2026-08-25)
 
 
