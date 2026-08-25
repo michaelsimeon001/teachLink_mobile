@@ -15,7 +15,7 @@
       "infoPlist": {
         "UIBackgroundModes": ["remote-notification"],
         "NSCameraUsageDescription": "TeachLink uses the camera to scan QR codes and open deep links.",
-        "LSApplicationQueriesSchemes": ["cydia"]
+        "LSApplicationQueriesSchemes": []
       },
       "associatedDomains": ["applinks:teachlink.com", "applinks:www.teachlink.com"],
       "buildNumber": "1",
