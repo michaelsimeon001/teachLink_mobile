@@ -21,6 +21,8 @@ export interface TimingEntry {
   /** Whether the call succeeded */
   success: boolean;
   timestamp: number;
+  /** Number of retries attempted for this request */
+  retryCount?: number;
 }
 
 export interface AggregatedMetrics {
