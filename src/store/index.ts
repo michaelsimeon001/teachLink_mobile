@@ -38,6 +38,7 @@ interface AppState {
   setSessionExpiringSoon: (isExpiringSoon: boolean) => void;
   setAuthLoading: (isAuthLoading: boolean) => void;
   setAuthError: (authError: string | null) => void;
+  setAuthLockedUntil: (authLockedUntil: number | null) => void;
   logout: () => void;
   setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;
@@ -114,6 +115,8 @@ export const useAppStore = create<AppState>()(
             set({ isAuthLoading }, false, 'setAuthLoading'),
           setAuthError: (authError: string | null) =>
             set({ authError }, false, 'setAuthError'),
+          setAuthLockedUntil: (authLockedUntil: number | null) =>
+            set({ authLockedUntil }, false, 'setAuthLockedUntil'),
           logout: () => {
             const userId = get().user?.id;
             set(
@@ -159,6 +162,9 @@ export const useAppStore = create<AppState>()(
               false,
               'incrementAuthFailure'
             ),
+            // Client-side UX lockout counter only. The actual rate-limit enforcement
+            // must happen server-side (per account and per IP). An attacker can
+            // clear app storage or call the API directly to bypass this counter.
           resetAuthFailures: () =>
             set({ authFailureCount: 0, authLockedUntil: null }, false, 'resetAuthFailures'),
           incrementRefreshFailure: () => {
