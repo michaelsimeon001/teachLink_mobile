@@ -1,3 +1,13 @@
+## [1.16.4](https://github.com/rinafcode/teachLink_mobile/compare/v1.16.3...v1.16.4) (2026-08-25)
+
+
+### Bug Fixes
+
+* **api:** add missing pushLogContext/popLogContext exports to fix ReferenceError ([#912](https://github.com/rinafcode/teachLink_mobile/issues/912)) ([cc9639f](https://github.com/rinafcode/teachLink_mobile/commit/cc9639f1ba8a5d0ca2adec2a37c29fe850d08faa))
+* **ci:** build APK before running Maestro E2E tests ([#915](https://github.com/rinafcode/teachLink_mobile/issues/915)) ([dd4d563](https://github.com/rinafcode/teachLink_mobile/commit/dd4d563730dcc80ca283ef2e3c9e689adf61a338))
+* **test.yml:** only print 'All tests passed' when job actually succeeds ([#914](https://github.com/rinafcode/teachLink_mobile/issues/914)) ([8529f37](https://github.com/rinafcode/teachLink_mobile/commit/8529f3780edf0924163402696fc447c244f5458d))
+* **tsconfig:** add skipLibCheck to unblock the syntax.yml type gate ([#913](https://github.com/rinafcode/teachLink_mobile/issues/913)) ([8327778](https://github.com/rinafcode/teachLink_mobile/commit/8327778f8326c576540e8fc1edf2cd2db12c3339))
+
 ## [1.16.3](https://github.com/rinafcode/teachLink_mobile/compare/v1.16.2...v1.16.3) (2026-08-25)
 
 
