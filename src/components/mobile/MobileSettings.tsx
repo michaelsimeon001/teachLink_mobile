@@ -19,7 +19,7 @@ import {
   Wifi,
   Zap,
 } from 'lucide-react-native';
-import React, { memo, useCallback, useRef, useState } from 'react';
+import React, { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 

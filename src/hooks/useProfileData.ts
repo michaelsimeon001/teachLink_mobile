@@ -1,10 +1,9 @@
 import { useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { useRequireReauth } from './';
-import { cacheFormValues } from '../../services/formCache';
-import { configureNext } from '../../utils/layoutAnimation';
-// Assuming types are defined here or imported from a central types file
-import { ProfileData, ProfileTab } from '../../types/profile';
+import { cacheFormValues } from '../services/formCache';
+import { configureNext } from '../utils/layoutAnimation';
+import { ProfileData, ProfileTab } from '../types/profile';
 
 export const useProfileData = (initialData: ProfileData) => {
   const [profile, setProfile] = useState<ProfileData>(initialData);
